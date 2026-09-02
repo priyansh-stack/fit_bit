@@ -1,0 +1,98 @@
+# ==============================================================================
+# 1. Firebase & Cloud Credentials / Secrets
+# ==============================================================================
+**/google-services.json
+**/GoogleService-Info.plist
+*firebase-adminsdk*.json
+*service-account*.json
+**/secrets.json
+.env
+.env.*
+*.env
+*.local
+*.private
+
+# ==============================================================================
+# 2. Android Keystores & Local Configuration
+# ==============================================================================
+**/local.properties
+**/key.properties
+**/*.keystore
+**/*.jks
+**/*.p12
+android/.gradle/
+android/.kotlin/
+**/captures/
+**/.cxx/
+**/GeneratedPluginRegistrant.java
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# ==============================================================================
+# 3. Flutter & Dart Build Artifacts / Dependencies
+# ==============================================================================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+**/build/
+*.apk
+*.aab
+*.aar
+/coverage/
+.widget_preview/
+app.*.symbols
+app.*.map.json
+**/doc/api/
+**/ios/Flutter/.last_build_id
+
+# ==============================================================================
+# 4. Firebase Functions & Node.js
+# ==============================================================================
+node_modules/
+**/node_modules/
+functions/lib/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+.firebase/
+
+# ==============================================================================
+# 5. Root Temporary & Test Screenshots / Logs
+# ==============================================================================
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+*.log
+
+# ==============================================================================
+# 6. IDEs, Editors & OS Files
+# ==============================================================================
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+*.swp
+*~
+*.class
+*.pyc
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/

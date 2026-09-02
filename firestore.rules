@@ -1,0 +1,61 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper functions ────────────────────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // ─── Users collection ────────────────────────────────────────────────
+    match /users/{uid} {
+      // Users can only read and write their own user profile document.
+      allow read, write: if isOwner(uid);
+
+      // ─── Health daily summaries ───────────────────────────────────────
+      match /healthDaily/{date} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // ─── Heart rate records ───────────────────────────────────────────
+      match /heartRate/{recordId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // ─── Sleep sessions ───────────────────────────────────────────────
+      match /sleep/{sessionId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // ─── Exercise records ─────────────────────────────────────────────
+      match /exercise/{recordId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // ─── Health metrics (SpO2, HRV, etc.) ─────────────────────────────
+      match /healthMetrics/{metricId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // ─── Google Health connections ────────────────────────────────────
+      match /connections/{connectionId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // ─── Sync checkpoints ─────────────────────────────────────────────
+      match /sync/{syncType} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

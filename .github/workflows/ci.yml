@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  flutter-test:
+    name: Flutter Analyze & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Analyze Project
+        run: flutter analyze
+
+      - name: Run Tests
+        run: flutter test
+
+  functions-build:
+    name: Cloud Functions Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: 'functions/package-lock.json'
+
+      - name: Install Functions Dependencies
+        working-directory: functions
+        run: npm ci
+
+      - name: Build TypeScript Functions
+        working-directory: functions
+        run: npm run build
+
+  build-debug-apk:
+    name: Build Android APK
+    needs: [flutter-test, functions-build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Prepare Mock google-services.json for CI
+        run: |
+          if [ ! -f android/app/google-services.json ]; then
+            cp android/app/google-services.json.example android/app/google-services.json
+          fi
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build Debug APK
+        run: flutter build apk --debug

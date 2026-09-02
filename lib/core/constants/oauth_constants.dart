@@ -1,0 +1,66 @@
+// lib/core/constants/oauth_constants.dart
+//
+// ⚠️ TESTING ONLY: OAuth client credentials configured for local testing.
+// In a production environment, OAuth authorization code and token exchange
+// MUST be handled server-side to keep secrets confidential.
+
+class OAuthConstants {
+  OAuthConstants._();
+
+  /// Google Cloud OAuth 2.0 Desktop Client ID.
+  /// Pass via `--dart-define=GOOGLE_CLIENT_ID=...` or `--dart-define-from-file=.env`
+  static const String clientId = String.fromEnvironment(
+    'GOOGLE_CLIENT_ID',
+    defaultValue:
+        '589835266478-oi03fq20ie29ig433ccecd67kcj19ae2.apps.googleusercontent.com',
+  );
+
+  /// Google Cloud OAuth 2.0 Client Secret.
+  /// Pass via `--dart-define=GOOGLE_CLIENT_SECRET=...` or `--dart-define-from-file=.env`
+  /// ⚠️ Keep confidential — never commit raw secrets to source control.
+  static const String clientSecret = String.fromEnvironment(
+    'GOOGLE_CLIENT_SECRET',
+    defaultValue: '',
+  );
+
+  /// Redirect URI registered with your Google Cloud OAuth Client.
+  /// Uses Google's standard RFC 8252 Reversed Client ID scheme for mobile apps.
+  static const String redirectUri = String.fromEnvironment(
+    'GOOGLE_REDIRECT_URI',
+    defaultValue:
+        'com.googleusercontent.apps.589835266478-oi03fq20ie29ig433ccecd67kcj19ae2:/oauth2redirect',
+  );
+
+  /// Google Cloud Project ID.
+  static const String projectId = String.fromEnvironment(
+    'GOOGLE_PROJECT_ID',
+    defaultValue: 'fitbit-health-dash-81a2f',
+  );
+
+  /// Google OAuth 2.0 Endpoints
+  static const String authEndpoint =
+      'https://accounts.google.com/o/oauth2/v2/auth';
+  static const String tokenEndpoint = 'https://oauth2.googleapis.com/token';
+  static const String revokeEndpoint = 'https://oauth2.googleapis.com/revoke';
+
+  /// Required Google Health API v4 Scopes
+  static const List<String> scopes = [
+    // Google Health API v4 Scopes (Do NOT mix legacy fitness.* scopes)
+    'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
+    'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
+    'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
+    'https://www.googleapis.com/auth/googlehealth.profile.readonly',
+    'https://www.googleapis.com/auth/googlehealth.settings.readonly',
+
+    // User profile information
+    'https://www.googleapis.com/auth/userinfo.profile',
+    'https://www.googleapis.com/auth/userinfo.email',
+  ];
+
+  /// Production Warning Message
+  static const String testingWarningTitle = '⚠️ TESTING ONLY';
+  static const String testingWarningBody =
+      'This application stores OAuth client secrets locally for on-device testing. '
+      'This is acceptable for local development but is NOT secure for production. '
+      'A production release must move OAuth secret exchange to a secure backend.';
+}
