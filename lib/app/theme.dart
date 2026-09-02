@@ -40,9 +40,8 @@ class AppTheme {
     final colorScheme = ColorScheme.fromSeed(
       seedColor: _brandPrimary,
       brightness: Brightness.dark,
-      background: _darkBackground,
       surface: _darkSurface,
-      surfaceVariant: _darkCardElevated,
+      surfaceContainerHighest: _darkCardElevated,
       primary: _brandPrimary,
       secondary: _brandSecondary,
       tertiary: _brandTertiary,
@@ -143,7 +142,6 @@ class AppTheme {
     final colorScheme = ColorScheme.fromSeed(
       seedColor: _brandPrimary,
       brightness: Brightness.light,
-      background: _lightBackground,
       surface: _lightSurface,
       primary: _brandPrimary,
       secondary: _brandSecondary,

@@ -107,8 +107,8 @@ class StepsBarChart extends StatelessWidget {
             ),
           ),
         ),
-        swapAnimationDuration: const Duration(milliseconds: 400),
-        swapAnimationCurve: Curves.easeOutCubic,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOutCubic,
       ),
     );
   }
