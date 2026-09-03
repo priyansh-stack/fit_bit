@@ -1060,8 +1060,12 @@ class GoogleHealthActiveMinutesData {
 
     int minutes = _extractInt(
         val['activeMinutes'] ?? val['activeMinutesSum'] ?? val['minutes']);
-    if (minutes == 0 && val['activeMinutesByActivityLevel'] is List) {
-      for (final lvl in val['activeMinutesByActivityLevel'] as List) {
+    final levelList = val['activeMinutesRollupByActivityLevel'] ??
+        val['activeMinutesByActivityLevel'] ??
+        json['activeMinutesRollupByActivityLevel'] ??
+        json['activeMinutesByActivityLevel'];
+    if (minutes == 0 && levelList is List) {
+      for (final lvl in levelList) {
         minutes += _extractInt(lvl);
       }
     }

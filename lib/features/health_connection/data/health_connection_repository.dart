@@ -349,9 +349,17 @@ class HealthConnectionRepository {
           final date = entry.key;
           final activeMin = entry.value;
           final existing = getBucket(date);
+          final stepCount = existing.steps ?? 0;
+          final estActiveCal = dailyActiveCalSum[date] ??
+              ((stepCount * 0.04).round() + (activeMin * 4));
+          final estTotalCal =
+              (existing.calories != null && existing.calories! > 1400)
+                  ? (1400 + estActiveCal)
+                  : (1400 + estActiveCal);
           dailyBuckets[date] = existing.copyWith(
             activeMinutes: activeMin,
-            activeCalories: dailyActiveCalSum[date] ?? existing.activeCalories,
+            activeCalories: estActiveCal > 0 ? estActiveCal : null,
+            calories: estTotalCal,
           );
         }
 

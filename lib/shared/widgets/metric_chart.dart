@@ -90,6 +90,11 @@ class StepsBarChart extends StatelessWidget {
                 getTitlesWidget: (value, meta) {
                   final i = value.toInt();
                   if (i < 0 || i >= labels.length) return const SizedBox();
+                  if (labels.length > 7 &&
+                      i % 2 != 0 &&
+                      i != labels.length - 1) {
+                    return const SizedBox();
+                  }
                   return Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(
@@ -149,6 +154,8 @@ class LineMetricChart extends StatelessWidget {
       height: 140,
       child: LineChart(
         LineChartData(
+          minX: 0,
+          maxX: labels.length > 1 ? (labels.length - 1).toDouble() : 1,
           minY: minY,
           maxY: maxY,
           gridData: FlGridData(
@@ -175,9 +182,16 @@ class LineMetricChart extends StatelessWidget {
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
+                interval: 1.0,
                 getTitlesWidget: (value, meta) {
+                  if (value != value.roundToDouble()) return const SizedBox();
                   final i = value.toInt();
                   if (i < 0 || i >= labels.length) return const SizedBox();
+                  if (labels.length > 7 &&
+                      i % 2 != 0 &&
+                      i != labels.length - 1) {
+                    return const SizedBox();
+                  }
                   return Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(

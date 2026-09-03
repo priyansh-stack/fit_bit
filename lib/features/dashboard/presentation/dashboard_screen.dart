@@ -224,7 +224,7 @@ class _MetricGrid extends StatelessWidget {
         ? (today!.calories! / goals.calorieGoal * 100).round()
         : null;
 
-    final activePercent = today?.activeMinutes != null && today!.activeMinutes! > 0
+    final activePercent = today?.activeMinutes != null
         ? (today!.activeMinutes! / goals.activeMinutesGoal * 100).round()
         : null;
 
@@ -257,7 +257,9 @@ class _MetricGrid extends StatelessWidget {
               ? '${_fmt(today!.calories!)} kcal'
               : '--',
           subtitle: calPercent != null
-              ? '$calPercent% of ${_fmt(goals.calorieGoal)} kcal'
+              ? (today?.activeCalories != null && today!.activeCalories! > 0
+                  ? '$calPercent% (${today!.activeCalories} active)'
+                  : '$calPercent% of ${_fmt(goals.calorieGoal)} kcal')
               : null,
           icon: Icons.local_fire_department_rounded,
           color: AppTheme.caloriesColor,
@@ -277,7 +279,7 @@ class _MetricGrid extends StatelessWidget {
         ),
         HealthCard(
           title: 'Active Min',
-          value: today?.activeMinutes != null && today!.activeMinutes! > 0
+          value: today?.activeMinutes != null
               ? '${today!.activeMinutes} min'
               : '--',
           subtitle: activePercent != null
@@ -286,9 +288,7 @@ class _MetricGrid extends StatelessWidget {
           icon: Icons.bolt_rounded,
           color: AppTheme.activeColor,
           isLoading: isLoading,
-          isEmpty:
-              (today?.activeMinutes == null || today!.activeMinutes == 0) &&
-                  !isLoading,
+          isEmpty: today?.activeMinutes == null && !isLoading,
         ),
         HealthCard(
           title: 'Heart Rate',

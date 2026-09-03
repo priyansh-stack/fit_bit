@@ -92,4 +92,40 @@ void main() {
       expect(fromJson.userId, 'user_123');
     });
   });
+
+  group('GoogleHealthActiveMinutesData Model Tests', () {
+    test('correctly parses activeMinutesRollupByActivityLevel from Google Health API', () {
+      final json = {
+        'civilStartTime': {
+          'date': {'year': 2026, 'month': 9, 'day': 1}
+        },
+        'activeMinutes': {
+          'activeMinutesRollupByActivityLevel': [
+            {'activityLevel': 'LIGHT', 'activeMinutesSum': '64'},
+            {'activityLevel': 'MODERATE', 'activeMinutesSum': '12'},
+            {'activityLevel': 'VIGOROUS', 'activeMinutesSum': '35'},
+          ]
+        }
+      };
+
+      final data = GoogleHealthActiveMinutesData.fromJson(json);
+      expect(data.date, '2026-09-01');
+      expect(data.activeMinutesSum, 111); // 64 + 12 + 35
+    });
+
+    test('correctly parses direct activeMinutesSum scalar', () {
+      final json = {
+        'civilStartTime': {
+          'date': {'year': 2026, 'month': 9, 'day': 2}
+        },
+        'activeMinutes': {
+          'activeMinutesSum': 45,
+        }
+      };
+
+      final data = GoogleHealthActiveMinutesData.fromJson(json);
+      expect(data.date, '2026-09-02');
+      expect(data.activeMinutesSum, 45);
+    });
+  });
 }
