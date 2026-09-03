@@ -44,7 +44,7 @@ class GoalsCubit extends Cubit<GoalsState> {
         }
       },
       onError: (e) {
-        // Fallback gracefully to default goals if offline or Firestore rule denies
+        // Fallback gracefully to default goals if offline
         emit(const GoalsLoaded(UserGoals.defaultGoals));
       },
     );
@@ -62,7 +62,12 @@ class GoalsCubit extends Cubit<GoalsState> {
             .doc('goals')
             .set(newGoals.toJson(), SetOptions(merge: true));
       } catch (e) {
-        // Local state was already updated; Firestore write can retry on next online sync
+        try {
+          await _firestore
+              .collection('users')
+              .doc(_uid)
+              .set({'goals': newGoals.toJson()}, SetOptions(merge: true));
+        } catch (_) {}
       }
     }
   }

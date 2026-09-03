@@ -51,6 +51,11 @@ service cloud.firestore {
       match /sync/{syncType} {
         allow read, write: if isOwner(uid);
       }
+
+      // ─── User settings & goals ─────────────────────────────────────────
+      match /settings/{settingId} {
+        allow read, write: if isOwner(uid);
+      }
     }
 
     // Deny all other access

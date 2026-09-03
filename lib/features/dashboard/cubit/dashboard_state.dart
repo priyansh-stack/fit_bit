@@ -2,6 +2,9 @@
 
 import 'package:equatable/equatable.dart';
 import '../../../core/models/health_daily.dart';
+import '../../../core/models/readiness_score.dart';
+import '../../../core/models/streak_data.dart';
+import '../../../core/models/weekly_trend.dart';
 
 class DashboardState extends Equatable {
   const DashboardState({
@@ -11,6 +14,9 @@ class DashboardState extends Equatable {
     this.caloriesChart = const {},
     this.sleepChart = const {},
     this.rhrChart = const {},
+    this.readinessScore,
+    this.streakData,
+    this.weeklyTrend,
     this.isLoading = true,
     this.errorMessage,
   });
@@ -21,6 +27,9 @@ class DashboardState extends Equatable {
   final Map<String, int> caloriesChart;
   final Map<String, double> sleepChart;
   final Map<String, int> rhrChart;
+  final ReadinessScore? readinessScore;
+  final StreakData? streakData;
+  final WeeklyTrend? weeklyTrend;
   final bool isLoading;
   final String? errorMessage;
 
@@ -31,6 +40,9 @@ class DashboardState extends Equatable {
     Map<String, int>? caloriesChart,
     Map<String, double>? sleepChart,
     Map<String, int>? rhrChart,
+    ReadinessScore? readinessScore,
+    StreakData? streakData,
+    WeeklyTrend? weeklyTrend,
     bool? isLoading,
     String? Function()? errorMessage,
   }) {
@@ -41,6 +53,9 @@ class DashboardState extends Equatable {
       caloriesChart: caloriesChart ?? this.caloriesChart,
       sleepChart: sleepChart ?? this.sleepChart,
       rhrChart: rhrChart ?? this.rhrChart,
+      readinessScore: readinessScore ?? this.readinessScore,
+      streakData: streakData ?? this.streakData,
+      weeklyTrend: weeklyTrend ?? this.weeklyTrend,
       isLoading: isLoading ?? this.isLoading,
       errorMessage: errorMessage != null ? errorMessage() : this.errorMessage,
     );
@@ -54,6 +69,9 @@ class DashboardState extends Equatable {
         caloriesChart,
         sleepChart,
         rhrChart,
+        readinessScore,
+        streakData,
+        weeklyTrend,
         isLoading,
         errorMessage,
       ];

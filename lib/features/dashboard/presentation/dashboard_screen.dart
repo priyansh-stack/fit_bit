@@ -13,6 +13,9 @@ import '../../goals/cubit/goals_cubit.dart';
 import '../../goals/cubit/goals_state.dart';
 import '../../health_connection/cubit/health_connection_cubit.dart';
 import '../cubit/dashboard_cubit.dart';
+import 'widgets/daily_readiness_card.dart';
+import 'widgets/streak_banner_card.dart';
+import 'widgets/weekly_trend_card.dart';
 import '../../../shared/widgets/health_card.dart';
 import '../../../shared/widgets/metric_chart.dart';
 import '../../../shared/widgets/error_view.dart';
@@ -35,157 +38,188 @@ class DashboardScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await context
-              .read<HealthConnectionCubit>()
-              .syncHealthData(fullHistory: true);
-          if (context.mounted) {
-            context.read<DashboardCubit>().refresh();
+      body: BlocListener<GoalsCubit, GoalsState>(
+        listener: (context, state) {
+          if (state is GoalsLoaded) {
+            context.read<DashboardCubit>().updateGoals(state.goals);
           }
         },
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            // App Bar
-            SliverAppBar(
-              floating: true,
-              pinned: false,
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _greeting(),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.55),
-                        ),
-                  ),
-                  const Text(
-                    'Your Health Today',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
+        child: RefreshIndicator(
+          onRefresh: () async {
+            await context
+                .read<HealthConnectionCubit>()
+                .syncHealthData(fullHistory: true);
+            if (context.mounted) {
+              context.read<DashboardCubit>().refresh();
+            }
+          },
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              // App Bar
+              SliverAppBar(
+                floating: true,
+                pinned: false,
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _greeting(),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.55),
+                          ),
                     ),
+                    const Text(
+                      'Your Health Today',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.sync_rounded, color: Colors.white70),
+                    tooltip: 'Sync Health Data',
+                    onPressed: () async {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Syncing health data...'),
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                      try {
+                        await context
+                            .read<HealthConnectionCubit>()
+                            .syncHealthData(fullHistory: true);
+                        if (context.mounted) {
+                          context.read<DashboardCubit>().refresh();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Sync complete!'),
+                              backgroundColor: AppTheme.activeColor,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Sync error: $e'),
+                              backgroundColor: AppTheme.warningColor,
+                            ),
+                          );
+                        }
+                      }
+                    },
                   ),
+                  if (!isConnected)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: ElevatedButton.icon(
+                        onPressed: () => context.go(AppRoute.connect),
+                        icon: const Icon(Icons.link_rounded, size: 16),
+                        label: const Text('Connect'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                          textStyle: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    ),
                 ],
               ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.sync_rounded, color: Colors.white70),
-                  tooltip: 'Sync Health Data',
-                  onPressed: () async {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Syncing health data...'),
-                        duration: Duration(seconds: 1),
+
+              // Content
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    // Offline / last-updated banner
+                    if (today?.updatedAt != null)
+                      _LastUpdatedBanner(updatedAt: today!.updatedAt!),
+
+                    // Not connected banner
+                    if (!isConnected && !connectionState.isLoading)
+                      _NotConnectedBanner(
+                          onConnect: () => context.go(AppRoute.connect)),
+
+                    const SizedBox(height: 14),
+
+                    // 1. Goal celebration banner if user hit or exceeded daily step goal
+                    if (today != null &&
+                        today.steps != null &&
+                        today.steps! >= goals.stepGoal) ...[
+                      _GoalCelebrationBanner(
+                        steps: today.steps!,
+                        goal: goals.stepGoal,
                       ),
-                    );
-                    try {
-                      await context
-                          .read<HealthConnectionCubit>()
-                          .syncHealthData(fullHistory: true);
-                      if (context.mounted) {
-                        context.read<DashboardCubit>().refresh();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Health data synchronized!'),
-                            backgroundColor: AppTheme.successColor,
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Sync error: $e'),
-                            backgroundColor: AppTheme.warningColor,
-                          ),
-                        );
-                      }
-                    }
-                  },
-                ),
-                if (!isConnected)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: ElevatedButton.icon(
-                      onPressed: () => context.go(AppRoute.connect),
-                      icon: const Icon(Icons.link_rounded, size: 16),
-                      label: const Text('Connect'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        textStyle: const TextStyle(fontSize: 13),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+                      const SizedBox(height: 14),
+                    ],
 
-            // Content
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate([
-                  // Offline / last-updated banner
-                  if (today?.updatedAt != null)
-                    _LastUpdatedBanner(updatedAt: today!.updatedAt!),
+                    // 2. Daily Readiness Score Card
+                    if (dashboardState.readinessScore != null &&
+                        !dashboardState.isLoading) ...[
+                      DailyReadinessCard(
+                          readiness: dashboardState.readinessScore!),
+                      const SizedBox(height: 14),
+                    ],
 
-                  // Not connected banner
-                  if (!isConnected && !connectionState.isLoading)
-                    _NotConnectedBanner(
-                        onConnect: () => context.go(AppRoute.connect)),
+                    // 3. Streak & Habit Tracking Banner
+                    if (dashboardState.streakData != null &&
+                        !dashboardState.isLoading) ...[
+                      StreakBannerCard(streak: dashboardState.streakData!),
+                      const SizedBox(height: 16),
+                    ],
 
-                  const SizedBox(height: 16),
+                    // 4. Metric cards grid
+                    if (dashboardState.isLoading)
+                      _MetricGrid(today: null, isLoading: true, goals: goals)
+                    else if (dashboardState.errorMessage != null)
+                      ErrorView(
+                        message:
+                            'Could not load health data. Check your connection.',
+                        onRetry: () => context.read<DashboardCubit>().refresh(),
+                      )
+                    else
+                      _MetricGrid(today: today, isLoading: false, goals: goals),
 
-                  // Goal celebration banner if user hit or exceeded daily step goal
-                  if (today != null &&
-                      today.steps != null &&
-                      today.steps! >= goals.stepGoal)
-                    _GoalCelebrationBanner(
-                      steps: today.steps!,
-                      goal: goals.stepGoal,
-                    ),
+                    const SizedBox(height: 24),
 
-                  // Metric cards grid
-                  if (dashboardState.isLoading)
-                    _MetricGrid(today: null, isLoading: true, goals: goals)
-                  else if (dashboardState.errorMessage != null)
-                    ErrorView(
-                      message:
-                          'Could not load health data. Check your connection.',
-                      onRetry: () => context.read<DashboardCubit>().refresh(),
-                    )
-                  else
-                    _MetricGrid(today: today, isLoading: false, goals: goals),
+                    // 5. Weekly Comparison & Coaching Card
+                    if (dashboardState.weeklyTrend != null &&
+                        !dashboardState.isLoading) ...[
+                      WeeklyTrendCard(trend: dashboardState.weeklyTrend!),
+                      const SizedBox(height: 24),
+                    ],
 
-                  const SizedBox(height: 28),
-
-                  // Steps 7-day chart
-                  const _SectionHeader(
-                    title: 'Steps — Last 7 Days',
-                    color: AppTheme.stepsColor,
-                  ),
-                  const SizedBox(height: 12),
-                  if (dashboardState.isLoading)
-                    const SizedBox(height: 160)
-                  else if (stepsChart.values.any((v) => v > 0))
-                    StepsBarChart(
-                      data: stepsChart,
+                    // 6. Steps 7-day chart
+                    const _SectionHeader(
+                      title: 'Steps — Last 7 Days',
                       color: AppTheme.stepsColor,
-                      goal: goals.stepGoal,
-                    )
-                  else
-                    const EmptyDataView(
-                      message:
-                          'No step data yet. Connect your Fitbit to start tracking.',
-                      icon: Icons.directions_walk_rounded,
                     ),
-                ]),
+                    const SizedBox(height: 12),
+                    if (dashboardState.isLoading)
+                      const SizedBox(height: 160)
+                    else if (stepsChart.values.any((v) => v > 0))
+                      StepsBarChart(
+                        data: stepsChart,
+                        color: AppTheme.stepsColor,
+                        goal: goals.stepGoal,
+                      )
+                    else
+                      const EmptyDataView(
+                        message:
+                            'No step data yet. Connect your Fitbit to start tracking.',
+                        icon: Icons.directions_walk_rounded,
+                      ),
+                  ]),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
