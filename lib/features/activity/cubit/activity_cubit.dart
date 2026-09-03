@@ -19,16 +19,25 @@ class ActivityCubit extends Cubit<ActivityState> {
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance,
         super(const ActivityState()) {
-    _subscribe();
+    _authSub = _auth.authStateChanges().listen((user) {
+      if (user != null) {
+        _subscribe(user.uid);
+      } else {
+        _historySub?.cancel();
+        _exerciseSub?.cancel();
+        emit(const ActivityState(isLoading: false));
+      }
+    });
   }
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
+  StreamSubscription? _authSub;
   StreamSubscription? _historySub;
   StreamSubscription? _exerciseSub;
 
-  void _subscribe() {
-    final uid = _auth.currentUser?.uid;
+  void _subscribe([String? targetUid]) {
+    final uid = targetUid ?? _auth.currentUser?.uid;
     if (uid == null) {
       emit(state.copyWith(isLoading: false));
       return;
@@ -94,6 +103,7 @@ class ActivityCubit extends Cubit<ActivityState> {
 
   @override
   Future<void> close() {
+    _authSub?.cancel();
     _historySub?.cancel();
     _exerciseSub?.cancel();
     return super.close();

@@ -19,16 +19,25 @@ class HeartCubit extends Cubit<HeartState> {
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance,
         super(const HeartState()) {
-    _subscribe();
+    _authSub = _auth.authStateChanges().listen((user) {
+      if (user != null) {
+        _subscribe(user.uid);
+      } else {
+        _dailySub?.cancel();
+        _hrSub?.cancel();
+        emit(const HeartState(isLoading: false));
+      }
+    });
   }
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
+  StreamSubscription? _authSub;
   StreamSubscription? _dailySub;
   StreamSubscription? _hrSub;
 
-  void _subscribe() {
-    final uid = _auth.currentUser?.uid;
+  void _subscribe([String? targetUid]) {
+    final uid = targetUid ?? _auth.currentUser?.uid;
     if (uid == null) {
       emit(state.copyWith(isLoading: false));
       return;
@@ -94,6 +103,7 @@ class HeartCubit extends Cubit<HeartState> {
 
   @override
   Future<void> close() {
+    _authSub?.cancel();
     _dailySub?.cancel();
     _hrSub?.cancel();
     return super.close();

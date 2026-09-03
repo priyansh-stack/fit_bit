@@ -40,29 +40,34 @@ class HealthConnectionRepository {
   final GoogleHealthConnector _connector;
   final GoogleFitnessService _fitnessService;
 
-  String get _uid => _auth.currentUser?.uid ?? 'local_user';
+  String? get _uid => _auth.currentUser?.uid;
 
   // ---------------------------------------------------------------------------
   // 1. Connection Document Stream & Accessors
   // ---------------------------------------------------------------------------
 
   Stream<HealthConnection?> watchConnection() {
-    return _firestore
-        .collection(FirestorePaths.users)
-        .doc(_uid)
-        .collection(FirestorePaths.connections)
-        .doc(FirestorePaths.googleHealthConnectionDoc)
-        .snapshots()
-        .map((doc) {
-      if (!doc.exists) return null;
-      return HealthConnection.fromFirestore(doc);
+    return _auth.authStateChanges().asyncExpand((user) {
+      if (user == null) return Stream.value(null);
+      return _firestore
+          .collection(FirestorePaths.users)
+          .doc(user.uid)
+          .collection(FirestorePaths.connections)
+          .doc(FirestorePaths.googleHealthConnectionDoc)
+          .snapshots()
+          .map((doc) {
+        if (!doc.exists) return null;
+        return HealthConnection.fromFirestore(doc);
+      });
     });
   }
 
   Future<HealthConnection?> getConnection() async {
+    final uid = _uid;
+    if (uid == null) return null;
     final doc = await _firestore
         .collection(FirestorePaths.users)
-        .doc(_uid)
+        .doc(uid)
         .collection(FirestorePaths.connections)
         .doc(FirestorePaths.googleHealthConnectionDoc)
         .get();
@@ -168,9 +173,16 @@ class HealthConnectionRepository {
       lastSyncAt: DateTime.now(),
     );
 
+    final uid = _uid;
+    if (uid == null) {
+      throw const HealthConnectionException(
+        message: 'User is not logged in. Please sign in before connecting.',
+      );
+    }
+
     await _firestore
         .collection(FirestorePaths.users)
-        .doc(_uid)
+        .doc(uid)
         .collection(FirestorePaths.connections)
         .doc(FirestorePaths.googleHealthConnectionDoc)
         .set(connection.toJson(), SetOptions(merge: true));
@@ -580,15 +592,18 @@ class HealthConnectionRepository {
       // -----------------------------------------------------------------------
       // G. Update connection & sync status
       // -----------------------------------------------------------------------
-      await _firestore
-          .collection(FirestorePaths.users)
-          .doc(_uid)
-          .collection(FirestorePaths.connections)
-          .doc(FirestorePaths.googleHealthConnectionDoc)
-          .set({
-        'lastSyncAt': FieldValue.serverTimestamp(),
-        'status': ConnectionStatus.active.name,
-      }, SetOptions(merge: true));
+      final uid = _uid;
+      if (uid != null) {
+        await _firestore
+            .collection(FirestorePaths.users)
+            .doc(uid)
+            .collection(FirestorePaths.connections)
+            .doc(FirestorePaths.googleHealthConnectionDoc)
+            .set({
+          'lastSyncAt': FieldValue.serverTimestamp(),
+          'status': ConnectionStatus.active.name,
+        }, SetOptions(merge: true));
+      }
 
       await _healthRepository.updateSyncStatus(
         syncType: FirestorePaths.syncFull,
@@ -610,11 +625,12 @@ class HealthConnectionRepository {
         errorMessage: e.toString(),
       );
 
-      if (e is TokenRevokedException) {
+      final uid = _uid;
+      if (e is TokenRevokedException && uid != null) {
         // Mark connection disconnected
         await _firestore
             .collection(FirestorePaths.users)
-            .doc(_uid)
+            .doc(uid)
             .collection(FirestorePaths.connections)
             .doc(FirestorePaths.googleHealthConnectionDoc)
             .set({
@@ -646,20 +662,23 @@ class HealthConnectionRepository {
     } finally {
       await GoogleHealthSession.logout();
 
-      await _firestore
-          .collection(FirestorePaths.users)
-          .doc(_uid)
-          .collection(FirestorePaths.connections)
-          .doc(FirestorePaths.googleHealthConnectionDoc)
-          .set({
-        'status': ConnectionStatus.disconnected.name,
-        'lastDisconnectedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final uid = _uid;
+      if (uid != null) {
+        await _firestore
+            .collection(FirestorePaths.users)
+            .doc(uid)
+            .collection(FirestorePaths.connections)
+            .doc(FirestorePaths.googleHealthConnectionDoc)
+            .set({
+          'status': ConnectionStatus.disconnected.name,
+          'lastDisconnectedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
 
-      await _firestore.collection(FirestorePaths.users).doc(_uid).set({
-        'healthConnected': false,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+        await _firestore.collection(FirestorePaths.users).doc(uid).set({
+          'healthConnected': false,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
     }
   }
 

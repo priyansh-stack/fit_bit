@@ -23,7 +23,7 @@ class HealthRepository {
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
 
-  String get _uid => _auth.currentUser?.uid ?? 'local_user';
+  String? get _uid => _auth.currentUser?.uid;
 
   // ---------------------------------------------------------------------------
   // 1. HEALTH DAILY (Aggregated Day Summaries)
@@ -32,38 +32,46 @@ class HealthRepository {
   /// Watch today's summary (or latest available)
   Stream<HealthDaily?> watchTodaySummary() {
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    return _firestore
-        .collection(FirestorePaths.users)
-        .doc(_uid)
-        .collection(FirestorePaths.healthDaily)
-        .doc(today)
-        .snapshots()
-        .map((doc) {
-      if (!doc.exists) return null;
-      return HealthDaily.fromFirestore(doc);
+    return _auth.authStateChanges().asyncExpand((user) {
+      if (user == null) return Stream.value(null);
+      return _firestore
+          .collection(FirestorePaths.users)
+          .doc(user.uid)
+          .collection(FirestorePaths.healthDaily)
+          .doc(today)
+          .snapshots()
+          .map((doc) {
+        if (!doc.exists) return null;
+        return HealthDaily.fromFirestore(doc);
+      });
     });
   }
 
   /// Watch latest N days of daily summaries for charts (default 7)
   Stream<List<HealthDaily>> watchRecentSummaries({int days = 7}) {
-    return _firestore
-        .collection(FirestorePaths.users)
-        .doc(_uid)
-        .collection(FirestorePaths.healthDaily)
-        .orderBy('date', descending: true)
-        .limit(days)
-        .snapshots()
-        .map((snap) {
-      final list = snap.docs.map(HealthDaily.fromFirestore).toList();
-      return list.reversed.toList(); // chronological order for charts
+    return _auth.authStateChanges().asyncExpand((user) {
+      if (user == null) return Stream.value(<HealthDaily>[]);
+      return _firestore
+          .collection(FirestorePaths.users)
+          .doc(user.uid)
+          .collection(FirestorePaths.healthDaily)
+          .orderBy('date', descending: true)
+          .limit(days)
+          .snapshots()
+          .map((snap) {
+        final list = snap.docs.map(HealthDaily.fromFirestore).toList();
+        return list.reversed.toList(); // chronological order for charts
+      });
     });
   }
 
   /// Save or merge a daily summary
   Future<void> saveDailySummary(HealthDaily summary) async {
+    final uid = _uid;
+    if (uid == null) return;
     await _firestore
         .collection(FirestorePaths.users)
-        .doc(_uid)
+        .doc(uid)
         .collection(FirestorePaths.healthDaily)
         .doc(summary.date)
         .set(summary.toJson(), SetOptions(merge: true));
@@ -71,12 +79,13 @@ class HealthRepository {
 
   /// Batch write daily summaries
   Future<void> batchSaveDailySummaries(List<HealthDaily> summaries) async {
-    if (summaries.isEmpty) return;
+    final uid = _uid;
+    if (uid == null || summaries.isEmpty) return;
     final batch = _firestore.batch();
     for (final s in summaries) {
       final ref = _firestore
           .collection(FirestorePaths.users)
-          .doc(_uid)
+          .doc(uid)
           .collection(FirestorePaths.healthDaily)
           .doc(s.date);
       batch.set(ref, s.toJson(), SetOptions(merge: true));
@@ -89,23 +98,28 @@ class HealthRepository {
   // ---------------------------------------------------------------------------
 
   Stream<List<HeartRateRecord>> watchRecentHeartRates({int limit = 50}) {
-    return _firestore
-        .collection(FirestorePaths.users)
-        .doc(_uid)
-        .collection(FirestorePaths.heartRate)
-        .orderBy('timestamp', descending: true)
-        .limit(limit)
-        .snapshots()
-        .map((snap) {
-      return snap.docs.map(HeartRateRecord.fromFirestore).toList();
+    return _auth.authStateChanges().asyncExpand((user) {
+      if (user == null) return Stream.value(<HeartRateRecord>[]);
+      return _firestore
+          .collection(FirestorePaths.users)
+          .doc(user.uid)
+          .collection(FirestorePaths.heartRate)
+          .orderBy('timestamp', descending: true)
+          .limit(limit)
+          .snapshots()
+          .map((snap) {
+        return snap.docs.map(HeartRateRecord.fromFirestore).toList();
+      });
     });
   }
 
   Future<void> saveHeartRateRecord(HeartRateRecord record) async {
+    final uid = _uid;
+    if (uid == null) return;
     final docId = record.timestamp.toIso8601String().replaceAll(':', '-');
     await _firestore
         .collection(FirestorePaths.users)
-        .doc(_uid)
+        .doc(uid)
         .collection(FirestorePaths.heartRate)
         .doc(docId)
         .set(record.toJson(), SetOptions(merge: true));
@@ -116,22 +130,27 @@ class HealthRepository {
   // ---------------------------------------------------------------------------
 
   Stream<List<SleepRecord>> watchRecentSleepSessions({int limit = 14}) {
-    return _firestore
-        .collection(FirestorePaths.users)
-        .doc(_uid)
-        .collection(FirestorePaths.sleep)
-        .orderBy('date', descending: true)
-        .limit(limit)
-        .snapshots()
-        .map((snap) {
-      return snap.docs.map(SleepRecord.fromFirestore).toList();
+    return _auth.authStateChanges().asyncExpand((user) {
+      if (user == null) return Stream.value(<SleepRecord>[]);
+      return _firestore
+          .collection(FirestorePaths.users)
+          .doc(user.uid)
+          .collection(FirestorePaths.sleep)
+          .orderBy('date', descending: true)
+          .limit(limit)
+          .snapshots()
+          .map((snap) {
+        return snap.docs.map(SleepRecord.fromFirestore).toList();
+      });
     });
   }
 
   Future<void> saveSleepRecord(SleepRecord record) async {
+    final uid = _uid;
+    if (uid == null) return;
     await _firestore
         .collection(FirestorePaths.users)
-        .doc(_uid)
+        .doc(uid)
         .collection(FirestorePaths.sleep)
         .doc(record.date)
         .set(record.toJson(), SetOptions(merge: true));
@@ -142,12 +161,15 @@ class HealthRepository {
   // ---------------------------------------------------------------------------
 
   Stream<List<SyncStatus>> watchSyncStatuses() {
-    return _firestore
-        .collection(FirestorePaths.users)
-        .doc(_uid)
-        .collection(FirestorePaths.sync)
-        .snapshots()
-        .map((snap) => snap.docs.map(SyncStatus.fromFirestore).toList());
+    return _auth.authStateChanges().asyncExpand((user) {
+      if (user == null) return Stream.value(<SyncStatus>[]);
+      return _firestore
+          .collection(FirestorePaths.users)
+          .doc(user.uid)
+          .collection(FirestorePaths.sync)
+          .snapshots()
+          .map((snap) => snap.docs.map(SyncStatus.fromFirestore).toList());
+    });
   }
 
   Future<void> updateSyncStatus({
@@ -157,9 +179,11 @@ class HealthRepository {
     int? recordsWritten,
     String? lastSuccessfulDate,
   }) async {
+    final uid = _uid;
+    if (uid == null) return;
     await _firestore
         .collection(FirestorePaths.users)
-        .doc(_uid)
+        .doc(uid)
         .collection(FirestorePaths.sync)
         .doc(syncType)
         .set({
@@ -174,9 +198,11 @@ class HealthRepository {
 
   /// Purges all cached daily and sleep documents for the current user in Firestore.
   Future<void> clearAllHealthData() async {
+    final uid = _uid;
+    if (uid == null) return;
     final healthDailyDocs = await _firestore
         .collection(FirestorePaths.users)
-        .doc(_uid)
+        .doc(uid)
         .collection(FirestorePaths.healthDaily)
         .get();
     for (final doc in healthDailyDocs.docs) {
@@ -185,7 +211,7 @@ class HealthRepository {
 
     final sleepDocs = await _firestore
         .collection(FirestorePaths.users)
-        .doc(_uid)
+        .doc(uid)
         .collection(FirestorePaths.sleep)
         .get();
     for (final doc in sleepDocs.docs) {

@@ -1,32 +1,49 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/models/user_goals.dart';
 import 'goals_state.dart';
 
 class GoalsCubit extends Cubit<GoalsState> {
   final FirebaseFirestore _firestore;
+  final FirebaseAuth? _auth;
   final String? _uid;
+  StreamSubscription? _authSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _subscription;
 
   GoalsCubit({
     required FirebaseFirestore firestore,
-    required String? uid,
+    FirebaseAuth? auth,
+    String? uid,
   })  : _firestore = firestore,
+        _auth = auth ??
+            (uid == null && Firebase.apps.isNotEmpty
+                ? FirebaseAuth.instance
+                : null),
         _uid = uid,
         super(const GoalsLoaded(UserGoals.defaultGoals)) {
-    _init();
+    final uid = _uid;
+    if (uid != null && uid.isNotEmpty) {
+      _subscribeToUid(uid);
+    } else if (_auth != null) {
+      _authSub = _auth.authStateChanges().listen((user) {
+        if (user != null) {
+          _subscribeToUid(user.uid);
+        } else {
+          _subscription?.cancel();
+          emit(const GoalsLoaded(UserGoals.defaultGoals));
+        }
+      });
+    }
   }
 
-  void _init() {
-    if (_uid == null || _uid.isEmpty) {
-      emit(const GoalsLoaded(UserGoals.defaultGoals));
-      return;
-    }
-
+  void _subscribeToUid(String uid) {
+    _subscription?.cancel();
     _subscription = _firestore
         .collection('users')
-        .doc(_uid)
+        .doc(uid)
         .collection('settings')
         .doc('goals')
         .snapshots()
@@ -53,11 +70,12 @@ class GoalsCubit extends Cubit<GoalsState> {
   Future<void> updateGoals(UserGoals newGoals) async {
     emit(GoalsLoaded(newGoals));
 
-    if (_uid != null && _uid.isNotEmpty) {
+    final effectiveUid = _uid ?? _auth?.currentUser?.uid;
+    if (effectiveUid != null && effectiveUid.isNotEmpty) {
       try {
         await _firestore
             .collection('users')
-            .doc(_uid)
+            .doc(effectiveUid)
             .collection('settings')
             .doc('goals')
             .set(newGoals.toJson(), SetOptions(merge: true));
@@ -65,7 +83,7 @@ class GoalsCubit extends Cubit<GoalsState> {
         try {
           await _firestore
               .collection('users')
-              .doc(_uid)
+              .doc(effectiveUid)
               .set({'goals': newGoals.toJson()}, SetOptions(merge: true));
         } catch (_) {}
       }
@@ -74,6 +92,7 @@ class GoalsCubit extends Cubit<GoalsState> {
 
   @override
   Future<void> close() {
+    _authSub?.cancel();
     _subscription?.cancel();
     return super.close();
   }

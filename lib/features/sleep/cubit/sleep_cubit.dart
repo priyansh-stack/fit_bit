@@ -18,15 +18,23 @@ class SleepCubit extends Cubit<SleepState> {
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance,
         super(const SleepState()) {
-    _subscribe();
+    _authSub = _auth.authStateChanges().listen((user) {
+      if (user != null) {
+        _subscribe(user.uid);
+      } else {
+        _sleepSub?.cancel();
+        emit(const SleepState(isLoading: false));
+      }
+    });
   }
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
+  StreamSubscription? _authSub;
   StreamSubscription? _sleepSub;
 
-  void _subscribe() {
-    final uid = _auth.currentUser?.uid;
+  void _subscribe([String? targetUid]) {
+    final uid = targetUid ?? _auth.currentUser?.uid;
     if (uid == null) {
       emit(state.copyWith(isLoading: false));
       return;
@@ -67,6 +75,7 @@ class SleepCubit extends Cubit<SleepState> {
 
   @override
   Future<void> close() {
+    _authSub?.cancel();
     _sleepSub?.cancel();
     return super.close();
   }
