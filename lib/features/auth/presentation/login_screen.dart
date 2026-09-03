@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/theme.dart';
 import '../../../core/errors/app_exception.dart';
+import '../bloc/auth_bloc.dart';
 import '../data/auth_repository.dart';
 import '../../../app/routes.dart';
 
@@ -103,7 +104,13 @@ class _LoginScreenState extends State<LoginScreen>
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Scaffold(
+    return BlocListener<AuthBloc, AuthState>(
+      listener: (context, state) {
+        if (state is Authenticated) {
+          context.go(AppRoute.home);
+        }
+      },
+      child: Scaffold(
       body: Stack(
         children: [
           // Gradient background
@@ -346,6 +353,7 @@ class _LoginScreenState extends State<LoginScreen>
           ),
         ],
       ),
+    ),
     );
   }
 }

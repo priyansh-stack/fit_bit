@@ -54,7 +54,13 @@ GoRouter createAppRouter(AuthBloc authBloc) {
         return AppRoute.connect;
       }
 
-      final isLoggedIn = authBloc.state is Authenticated;
+      final authState = authBloc.state;
+      // Do not prematurely redirect to login while checking persisted session
+      if (authState is AuthInitial) {
+        return null;
+      }
+
+      final isLoggedIn = authState is Authenticated;
       final isOnLogin = state.matchedLocation == AppRoute.login;
 
       if (!isLoggedIn && !isOnLogin) return AppRoute.login;

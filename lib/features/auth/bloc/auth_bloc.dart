@@ -27,16 +27,28 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final AuthRepository _authRepository;
   StreamSubscription? _userSubscription;
 
-  void _onAuthCheckRequested(
+  Future<void> _onAuthCheckRequested(
     AuthCheckRequested event,
     Emitter<AuthState> emit,
-  ) {
+  ) async {
     final user = _authRepository.currentUser;
     if (user != null) {
       emit(Authenticated(user));
-    } else {
-      emit(const Unauthenticated());
+      return;
     }
+
+    try {
+      // Give native Android Firebase SDK time to restore persisted auth tokens on cold start
+      final restoredUser = await _authRepository.authStateChanges
+          .first
+          .timeout(const Duration(milliseconds: 1500));
+      if (restoredUser != null) {
+        emit(Authenticated(restoredUser));
+        return;
+      }
+    } catch (_) {}
+
+    emit(const Unauthenticated());
   }
 
   void _onAuthUserChanged(

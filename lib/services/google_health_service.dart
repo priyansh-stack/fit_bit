@@ -9,13 +9,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 import '../core/constants/api_constants.dart';
 import '../core/constants/oauth_constants.dart';
 import '../core/errors/app_exception.dart';
+import '../core/services/safe_secure_storage.dart';
 
 // =============================================================================
 // 1. OAUTH CREDENTIALS & SESSION
@@ -63,29 +63,28 @@ class GoogleHealthCredentials {
 
 class GoogleHealthSession {
   GoogleHealthSession._();
-  static const _storage = FlutterSecureStorage();
 
   static Future<void> saveCredentials(GoogleHealthCredentials creds) async {
-    await _storage.write(
+    await SafeSecureStorage.write(
       key: SecureStorageKeys.googleHealthAccessToken,
       value: creds.accessToken,
     );
     if (creds.refreshToken != null) {
-      await _storage.write(
+      await SafeSecureStorage.write(
         key: SecureStorageKeys.googleHealthRefreshToken,
         value: creds.refreshToken,
       );
     }
-    await _storage.write(
+    await SafeSecureStorage.write(
       key: SecureStorageKeys.googleHealthTokenExpiry,
       value: creds.tokenExpiry.toIso8601String(),
     );
-    await _storage.write(
+    await SafeSecureStorage.write(
       key: SecureStorageKeys.googleHealthGrantedScopes,
       value: jsonEncode(creds.grantedScopes),
     );
     if (creds.userId != null) {
-      await _storage.write(
+      await SafeSecureStorage.write(
         key: SecureStorageKeys.googleHealthUserId,
         value: creds.userId,
       );
@@ -93,43 +92,48 @@ class GoogleHealthSession {
   }
 
   static Future<GoogleHealthCredentials?> loadCredentials() async {
-    final token =
-        await _storage.read(key: SecureStorageKeys.googleHealthAccessToken);
-    final expiryStr =
-        await _storage.read(key: SecureStorageKeys.googleHealthTokenExpiry);
-    if (token == null || expiryStr == null) return null;
+    try {
+      final token = await SafeSecureStorage.read(
+          key: SecureStorageKeys.googleHealthAccessToken);
+      final expiryStr = await SafeSecureStorage.read(
+          key: SecureStorageKeys.googleHealthTokenExpiry);
+      if (token == null || expiryStr == null) return null;
 
-    final refreshToken =
-        await _storage.read(key: SecureStorageKeys.googleHealthRefreshToken);
-    final scopesStr =
-        await _storage.read(key: SecureStorageKeys.googleHealthGrantedScopes);
-    final userId =
-        await _storage.read(key: SecureStorageKeys.googleHealthUserId);
+      final refreshToken = await SafeSecureStorage.read(
+          key: SecureStorageKeys.googleHealthRefreshToken);
+      final scopesStr = await SafeSecureStorage.read(
+          key: SecureStorageKeys.googleHealthGrantedScopes);
+      final userId =
+          await SafeSecureStorage.read(key: SecureStorageKeys.googleHealthUserId);
 
-    List<String> scopes = [];
-    if (scopesStr != null) {
-      try {
-        scopes = (jsonDecode(scopesStr) as List<dynamic>)
-            .map((e) => e.toString())
-            .toList();
-      } catch (_) {}
+      List<String> scopes = [];
+      if (scopesStr != null) {
+        try {
+          scopes = (jsonDecode(scopesStr) as List<dynamic>)
+              .map((e) => e.toString())
+              .toList();
+        } catch (_) {}
+      }
+
+      return GoogleHealthCredentials(
+        accessToken: token,
+        refreshToken: refreshToken,
+        tokenExpiry: DateTime.tryParse(expiryStr) ?? DateTime.now(),
+        grantedScopes: scopes,
+        userId: userId,
+      );
+    } catch (e) {
+      debugPrint('[GoogleHealthSession] loadCredentials failed non-fatally: $e');
+      return null;
     }
-
-    return GoogleHealthCredentials(
-      accessToken: token,
-      refreshToken: refreshToken,
-      tokenExpiry: DateTime.tryParse(expiryStr) ?? DateTime.now(),
-      grantedScopes: scopes,
-      userId: userId,
-    );
   }
 
   static Future<void> logout() async {
-    await _storage.delete(key: SecureStorageKeys.googleHealthAccessToken);
-    await _storage.delete(key: SecureStorageKeys.googleHealthRefreshToken);
-    await _storage.delete(key: SecureStorageKeys.googleHealthTokenExpiry);
-    await _storage.delete(key: SecureStorageKeys.googleHealthGrantedScopes);
-    await _storage.delete(key: SecureStorageKeys.googleHealthUserId);
+    await SafeSecureStorage.delete(key: SecureStorageKeys.googleHealthAccessToken);
+    await SafeSecureStorage.delete(key: SecureStorageKeys.googleHealthRefreshToken);
+    await SafeSecureStorage.delete(key: SecureStorageKeys.googleHealthTokenExpiry);
+    await SafeSecureStorage.delete(key: SecureStorageKeys.googleHealthGrantedScopes);
+    await SafeSecureStorage.delete(key: SecureStorageKeys.googleHealthUserId);
   }
 }
 

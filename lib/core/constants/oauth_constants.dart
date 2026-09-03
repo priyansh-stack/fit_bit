@@ -4,8 +4,8 @@
 // In a production environment, OAuth authorization code and token exchange
 // MUST be handled server-side to keep secrets confidential.
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'api_constants.dart';
+import '../services/safe_secure_storage.dart';
 
 class OAuthConstants {
   OAuthConstants._();
@@ -32,9 +32,8 @@ class OAuthConstants {
       return clientSecret;
     }
     try {
-      const storage = FlutterSecureStorage();
       final stored =
-          await storage.read(key: SecureStorageKeys.googleHealthClientSecret);
+          await SafeSecureStorage.read(key: SecureStorageKeys.googleHealthClientSecret);
       if (stored != null && stored.trim().isNotEmpty) {
         return stored.trim();
       }
@@ -46,8 +45,7 @@ class OAuthConstants {
 
   /// Persists a user-entered or locally provided OAuth client secret securely.
   static Future<void> saveClientSecret(String secret) async {
-    const storage = FlutterSecureStorage();
-    await storage.write(
+    await SafeSecureStorage.write(
       key: SecureStorageKeys.googleHealthClientSecret,
       value: secret.trim(),
     );

@@ -87,11 +87,19 @@ class HealthConnectionCubit extends Cubit<HealthConnectionState> {
         errorMessage: () => e.message,
       ));
     } catch (e) {
+      final str = e.toString();
+      String friendlyMsg = str;
+      if (str.contains('BadPaddingException') ||
+          str.contains('BAD_DECRYPT') ||
+          str.contains('KeyStore')) {
+        friendlyMsg =
+            'Secure storage key was rotated. Please tap Reconnect to restore your connection.';
+      }
       emit(state.copyWith(
         isSyncing: false,
         syncSuccess: false,
         syncMessage: () => null,
-        errorMessage: () => e.toString(),
+        errorMessage: () => friendlyMsg,
       ));
     }
   }
