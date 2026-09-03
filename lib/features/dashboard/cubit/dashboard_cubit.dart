@@ -57,11 +57,18 @@ class DashboardCubit extends Cubit<DashboardState> {
         final sleep = _computeSleepChart(list);
         final rhr = _computeRhrChart(list);
 
-        final readiness = ReadinessCalculator.calculate(
-          today: today,
-          recentDays: list,
-          goals: _currentGoals,
-        );
+        final hasBiometrics = list.any((d) =>
+            (d.steps != null && d.steps! > 0) ||
+            (d.sleepMinutes != null && d.sleepMinutes! > 0) ||
+            (d.restingHeartRate != null && d.restingHeartRate! > 0));
+
+        final readiness = hasBiometrics
+            ? ReadinessCalculator.calculate(
+                today: today,
+                recentDays: list,
+                goals: _currentGoals,
+              )
+            : null;
 
         final streak = StreakCalculator.calculate(
           days: list,
@@ -102,7 +109,6 @@ class DashboardCubit extends Cubit<DashboardState> {
     final today = HealthDateUtils.todayIso();
     final found = list.where((d) => d.date == today).firstOrNull;
     if (found != null) return found;
-    if (list.isNotEmpty) return list.last;
     return HealthDaily(
       date: today,
       steps: 0,
@@ -110,7 +116,7 @@ class DashboardCubit extends Cubit<DashboardState> {
       distanceMeters: 0,
       activeMinutes: 0,
       source: 'google_health',
-      updatedAt: DateTime.now(),
+      updatedAt: null,
     );
   }
 

@@ -6,11 +6,13 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../app/theme.dart';
 import '../../../core/models/health_daily.dart';
 import '../../../core/models/heart_rate_record.dart';
+import '../../../core/models/heart_rate_zones.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../../shared/widgets/metric_chart.dart';
 import '../../../shared/widgets/error_view.dart';
 import '../../health_connection/cubit/health_connection_cubit.dart';
 import '../cubit/heart_cubit.dart';
+import 'widgets/heart_rate_zones_card.dart';
 
 class HeartScreen extends StatelessWidget {
   const HeartScreen({super.key});
@@ -154,6 +156,15 @@ class _HeartContent extends StatelessWidget {
               color: const Color(0xFF10B981),
             ),
           ],
+        ),
+
+        const SizedBox(height: 20),
+
+        // Heart Rate Training Zones & Active Zone Minutes
+        HeartRateZonesCard(
+          zones: HeartRateZones.fromBiometrics(
+            records: recentHR,
+          ),
         ),
 
         const SizedBox(height: 24),

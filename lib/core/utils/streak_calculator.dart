@@ -17,8 +17,8 @@ class StreakCalculator {
     }
 
     final todayIso = HealthDateUtils.todayIso();
-    final todayRecord = days.where((d) => d.date == todayIso).firstOrNull ?? days.last;
-    final isGoalHitToday = (todayRecord.steps ?? 0) >= stepGoal;
+    final todayRecord = days.where((d) => d.date == todayIso).firstOrNull;
+    final isGoalHitToday = (todayRecord?.steps ?? 0) >= stepGoal;
 
     // 1. Weekly items for last 7 dates
     final last7Dates = HealthDateUtils.lastNDates(7);

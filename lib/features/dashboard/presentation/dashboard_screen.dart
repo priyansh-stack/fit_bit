@@ -12,8 +12,11 @@ import '../../../core/utils/date_utils.dart';
 import '../../goals/cubit/goals_cubit.dart';
 import '../../goals/cubit/goals_state.dart';
 import '../../health_connection/cubit/health_connection_cubit.dart';
+import '../../../core/models/health_insight.dart';
+import '../../../core/utils/health_coach_engine.dart';
 import '../cubit/dashboard_cubit.dart';
 import 'widgets/daily_readiness_card.dart';
+import 'widgets/smart_coach_banner.dart';
 import 'widgets/streak_banner_card.dart';
 import 'widgets/weekly_trend_card.dart';
 import '../../../shared/widgets/health_card.dart';
@@ -35,6 +38,15 @@ class DashboardScreen extends StatelessWidget {
     final isConnected = connectionState.isConnected;
     final today = dashboardState.today;
     final stepsChart = dashboardState.stepsChart;
+
+    final insights = (today != null && !dashboardState.isLoading)
+        ? HealthCoachEngine.generateInsights(
+            today: today,
+            recentDays: dashboardState.recentDays,
+            goals: goals,
+            readiness: dashboardState.readinessScore,
+          )
+        : const <HealthInsight>[];
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -171,6 +183,12 @@ class DashboardScreen extends StatelessWidget {
                     if (dashboardState.streakData != null &&
                         !dashboardState.isLoading) ...[
                       StreakBannerCard(streak: dashboardState.streakData!),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // 4. Smart Health Coach Insights
+                    if (insights.isNotEmpty && !dashboardState.isLoading) ...[
+                      SmartCoachBanner(insights: insights),
                       const SizedBox(height: 16),
                     ],
 
