@@ -4,6 +4,9 @@
 // In a production environment, OAuth authorization code and token exchange
 // MUST be handled server-side to keep secrets confidential.
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'api_constants.dart';
+
 class OAuthConstants {
   OAuthConstants._();
 
@@ -22,6 +25,33 @@ class OAuthConstants {
     'GOOGLE_CLIENT_SECRET',
     defaultValue: '',
   );
+
+  /// Resolves the OAuth client secret from compile-time environment or secure storage.
+  static Future<String> resolveClientSecret() async {
+    if (clientSecret.isNotEmpty) {
+      return clientSecret;
+    }
+    try {
+      const storage = FlutterSecureStorage();
+      final stored =
+          await storage.read(key: SecureStorageKeys.googleHealthClientSecret);
+      if (stored != null && stored.trim().isNotEmpty) {
+        return stored.trim();
+      }
+    } catch (_) {
+      // In test environments or when storage is unavailable, return empty
+    }
+    return '';
+  }
+
+  /// Persists a user-entered or locally provided OAuth client secret securely.
+  static Future<void> saveClientSecret(String secret) async {
+    const storage = FlutterSecureStorage();
+    await storage.write(
+      key: SecureStorageKeys.googleHealthClientSecret,
+      value: secret.trim(),
+    );
+  }
 
   /// Redirect URI registered with your Google Cloud OAuth Client.
   /// Uses Google's standard RFC 8252 Reversed Client ID scheme for mobile apps.

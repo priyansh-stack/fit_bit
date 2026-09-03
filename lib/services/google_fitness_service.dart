@@ -35,10 +35,11 @@ class GoogleFitnessService {
     required DateTime endDate,
   }) async {
     // 1. Refresh token if expiring
+    final clientSecret = await OAuthConstants.resolveClientSecret();
     final creds = await _connector.refreshTokenIfNeeded(
       credentials,
       clientId: OAuthConstants.clientId,
-      clientSecret: OAuthConstants.clientSecret,
+      clientSecret: clientSecret,
     );
 
     // Compute start and end milliseconds at local day boundaries
@@ -187,10 +188,11 @@ class GoogleFitnessService {
     required DateTime startDate,
     required DateTime endDate,
   }) async {
+    final clientSecret = await OAuthConstants.resolveClientSecret();
     final creds = await _connector.refreshTokenIfNeeded(
       credentials,
       clientId: OAuthConstants.clientId,
-      clientSecret: OAuthConstants.clientSecret,
+      clientSecret: clientSecret,
     );
 
     final startIso = startDate.toUtc().toIso8601String();

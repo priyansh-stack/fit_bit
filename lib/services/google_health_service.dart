@@ -369,10 +369,13 @@ abstract class BaseGoogleHealthDataManager<T> {
   @protected
   Future<Map<String, dynamic>> executeRequest(GoogleHealthAPIURL url) async {
     // 1. Transparent token refresh within 60 seconds of expiry
+    final resolvedSecret = clientSecret.isNotEmpty
+        ? clientSecret
+        : await OAuthConstants.resolveClientSecret();
     credentials = await _connector.refreshTokenIfNeeded(
       credentials,
       clientId: clientId,
-      clientSecret: clientSecret,
+      clientSecret: resolvedSecret,
     );
 
     final requestUri = Uri.parse(url.url);

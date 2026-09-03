@@ -7,6 +7,8 @@ import 'package:fitbit_health_dashboard/services/google_fitness_service.dart';
 import 'package:fitbit_health_dashboard/services/google_health_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('GoogleFitnessService Tests', () {
     test(
         'fetchDailyAggregates parses steps, calories, distance, and heart rate correctly',

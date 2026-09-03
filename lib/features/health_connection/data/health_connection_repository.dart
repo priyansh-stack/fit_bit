@@ -126,10 +126,18 @@ class HealthConnectionRepository {
     }
 
     // 1. Exchange code for credentials
+    final clientSecret = await OAuthConstants.resolveClientSecret();
+    if (clientSecret.isEmpty) {
+      throw const HealthConnectionException(
+        message: 'OAuth client_secret is missing. '
+            'Please run with --dart-define-from-file=.env or configure your secret.',
+      );
+    }
+
     final credentials = await _connector.exchangeCode(
       code: code,
       clientId: OAuthConstants.clientId,
-      clientSecret: OAuthConstants.clientSecret,
+      clientSecret: clientSecret,
       redirectUri: OAuthConstants.redirectUri,
     );
 

@@ -95,11 +95,27 @@ class _ConnectScreenState extends State<ConnectScreen> {
   }
 
   Future<void> _connect() async {
+    final secret = await OAuthConstants.resolveClientSecret();
+    if (secret.isEmpty) {
+      if (!mounted) return;
+      final entered = await _showClientSecretDialog(context);
+      if (entered == null || entered.trim().isEmpty) {
+        setState(() {
+          _isConnecting = false;
+          _errorMessage =
+              'Google OAuth Client Secret is required to exchange tokens with Google Cloud.';
+        });
+        return;
+      }
+      await OAuthConstants.saveClientSecret(entered.trim());
+    }
+
     setState(() {
       _isConnecting = true;
       _errorMessage = null;
     });
 
+    if (!mounted) return;
     try {
       final repo = context.read<HealthConnectionRepository>();
       await repo.startOAuthFlow();
@@ -121,11 +137,40 @@ class _ConnectScreenState extends State<ConnectScreen> {
     }
   }
 
+  Future<void> _openSecretConfig() async {
+    final entered = await _showClientSecretDialog(context);
+    if (entered != null && entered.trim().isNotEmpty) {
+      await OAuthConstants.saveClientSecret(entered.trim());
+      if (mounted) {
+        setState(() {
+          _errorMessage = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Client secret saved securely! Tap Connect to proceed.'),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<String?> _showClientSecretDialog(BuildContext context) {
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _ClientSecretSheet(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
           // Background gradient
@@ -176,14 +221,24 @@ class _ConnectScreenState extends State<ConnectScreen> {
                           ],
                         ),
                       ),
-                      TextButton(
-                        onPressed: () => context.go(AppRoute.home),
-                        child: Text(
-                          'Skip',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.key_rounded,
+                                size: 18, color: Colors.white70),
+                            tooltip: 'Configure Client Secret',
+                            onPressed: _openSecretConfig,
                           ),
-                        ),
+                          TextButton(
+                            onPressed: () => context.go(AppRoute.home),
+                            child: Text(
+                              'Skip',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.5),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -283,10 +338,31 @@ class _ConnectScreenState extends State<ConnectScreen> {
                         border:
                             Border.all(color: cs.error.withValues(alpha: 0.3)),
                       ),
-                      child: Text(
-                        _errorMessage!,
-                        style: TextStyle(color: cs.error, fontSize: 13),
-                        textAlign: TextAlign.center,
+                      child: Column(
+                        children: [
+                          Text(
+                            _errorMessage!,
+                            style: TextStyle(color: cs.error, fontSize: 13),
+                            textAlign: TextAlign.center,
+                          ),
+                          if (_errorMessage!
+                                  .toLowerCase()
+                                  .contains('client_secret') ||
+                              _errorMessage!
+                                  .toLowerCase()
+                                  .contains('secret')) ...[
+                            const SizedBox(height: 8),
+                            TextButton.icon(
+                              onPressed: _openSecretConfig,
+                              icon: const Icon(Icons.key_rounded, size: 16),
+                              label: const Text('Configure Client Secret'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: cs.primary,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ],
@@ -404,6 +480,182 @@ class _PermissionCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ClientSecretSheet extends StatefulWidget {
+  const _ClientSecretSheet();
+
+  @override
+  State<_ClientSecretSheet> createState() => _ClientSecretSheetState();
+}
+
+class _ClientSecretSheetState extends State<_ClientSecretSheet> {
+  late final TextEditingController _controller;
+  bool _obscureText = true;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    _loadInitialSecret();
+  }
+
+  Future<void> _loadInitialSecret() async {
+    final secret = await OAuthConstants.resolveClientSecret();
+    if (mounted) {
+      setState(() {
+        _controller.text = secret;
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 28,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.key_rounded,
+                      color: Color(0xFF818CF8), size: 24),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'OAuth Client Secret',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Saved securely on device keychain',
+                        style: TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Google Health API v4 requires your OAuth client secret for token exchange. Paste your GOOGLE_CLIENT_SECRET from your .env file or Google Cloud Console:',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.75),
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (_isLoading)
+              const Center(child: CircularProgressIndicator())
+            else
+              TextField(
+                controller: _controller,
+                obscureText: _obscureText,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'e.g. GOCSPX-xxxxxxxxxxxxxxxx',
+                  hintStyle:
+                      TextStyle(color: Colors.white.withValues(alpha: 0.3)),
+                  filled: true,
+                  fillColor: const Color(0xFF0F172A),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide:
+                        BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFF6366F1)),
+                  ),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureText
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      color: Colors.white60,
+                      size: 20,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscureText = !_obscureText),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop(_controller.text.trim());
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6366F1),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Save Secret & Continue',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            ),
+          ],
+        ),
       ),
     );
   }

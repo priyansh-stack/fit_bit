@@ -56,6 +56,7 @@ class SecureStorageKeys {
   static const String googleHealthTokenExpiry = 'gh_token_expiry';
   static const String googleHealthGrantedScopes = 'gh_granted_scopes';
   static const String googleHealthUserId = 'gh_user_id';
+  static const String googleHealthClientSecret = 'gh_client_secret';
 }
 
 /// Google Health API v4 — data type names.
