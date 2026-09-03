@@ -9,6 +9,7 @@ import '../../../core/models/heart_rate_record.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../../shared/widgets/metric_chart.dart';
 import '../../../shared/widgets/error_view.dart';
+import '../../health_connection/cubit/health_connection_cubit.dart';
 import '../cubit/heart_cubit.dart';
 
 class HeartScreen extends StatelessWidget {
@@ -18,19 +19,29 @@ class HeartScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Heart & Cardiovascular')),
-      body: BlocBuilder<HeartCubit, HeartState>(
-        builder: (context, state) {
-          if (state.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await context
+              .read<HealthConnectionCubit>()
+              .syncHealthData(fullHistory: true);
+          if (context.mounted) {
+            context.read<HeartCubit>().refresh();
           }
-          if (state.errorMessage != null) {
-            return ErrorView(
-              message: 'Failed to load heart rate data.',
-              onRetry: () => context.read<HeartCubit>().refresh(),
-            );
-          }
-          return _HeartContent(days: state.daily, recentHR: state.recentHR);
         },
+        child: BlocBuilder<HeartCubit, HeartState>(
+          builder: (context, state) {
+            if (state.isLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (state.errorMessage != null) {
+              return ErrorView(
+                message: 'Failed to load heart rate data.',
+                onRetry: () => context.read<HeartCubit>().refresh(),
+              );
+            }
+            return _HeartContent(days: state.daily, recentHR: state.recentHR);
+          },
+        ),
       ),
     );
   }
@@ -65,6 +76,7 @@ class _HeartContent extends StatelessWidget {
     final latest = days.isNotEmpty ? days.last : null;
 
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
         // Hero RHR card

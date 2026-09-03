@@ -1,5 +1,5 @@
-// lib/app/app.dart
-
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +8,7 @@ import '../features/activity/cubit/activity_cubit.dart';
 import '../features/auth/bloc/auth_bloc.dart';
 import '../features/auth/data/auth_repository.dart';
 import '../features/dashboard/cubit/dashboard_cubit.dart';
+import '../features/goals/cubit/goals_cubit.dart';
 import '../features/health_connection/cubit/health_connection_cubit.dart';
 import '../features/health_connection/data/health_connection_repository.dart';
 import '../features/heart/cubit/heart_cubit.dart';
@@ -41,6 +42,12 @@ class App extends StatelessWidget {
             create: (context) => AuthBloc(
               authRepository: context.read<AuthRepository>(),
             )..add(const AuthCheckRequested()),
+          ),
+          BlocProvider<GoalsCubit>(
+            create: (_) => GoalsCubit(
+              firestore: FirebaseFirestore.instance,
+              uid: FirebaseAuth.instance.currentUser?.uid,
+            ),
           ),
           BlocProvider<HealthConnectionCubit>(
             create: (context) => HealthConnectionCubit(

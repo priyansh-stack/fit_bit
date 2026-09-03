@@ -8,7 +8,9 @@ import '../../../core/models/sleep_record.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../../shared/widgets/metric_chart.dart';
 import '../../../shared/widgets/error_view.dart';
+import '../../health_connection/cubit/health_connection_cubit.dart';
 import '../cubit/sleep_cubit.dart';
+import 'widgets/sleep_stage_hypnogram.dart';
 
 class SleepScreen extends StatelessWidget {
   const SleepScreen({super.key});
@@ -17,19 +19,29 @@ class SleepScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Sleep')),
-      body: BlocBuilder<SleepCubit, SleepState>(
-        builder: (context, state) {
-          if (state.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await context
+              .read<HealthConnectionCubit>()
+              .syncHealthData(fullHistory: true);
+          if (context.mounted) {
+            context.read<SleepCubit>().refresh();
           }
-          if (state.errorMessage != null) {
-            return ErrorView(
-              message: 'Failed to load sleep data.',
-              onRetry: () => context.read<SleepCubit>().refresh(),
-            );
-          }
-          return _SleepContent(sessions: state.sessions);
         },
+        child: BlocBuilder<SleepCubit, SleepState>(
+          builder: (context, state) {
+            if (state.isLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (state.errorMessage != null) {
+              return ErrorView(
+                message: 'Failed to load sleep data.',
+                onRetry: () => context.read<SleepCubit>().refresh(),
+              );
+            }
+            return _SleepContent(sessions: state.sessions);
+          },
+        ),
       ),
     );
   }
@@ -57,7 +69,10 @@ class _SleepContent extends StatelessWidget {
         : sessions.map((s) => s.durationMinutes).reduce((a, b) => a + b) ~/
             sessions.length;
 
+    final latestSession = sessions.isNotEmpty ? sessions.last : null;
+
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
         // Average card
@@ -103,6 +118,12 @@ class _SleepContent extends StatelessWidget {
           ),
         ),
 
+        // Sleep stage breakdown hypnogram for most recent night
+        if (latestSession != null) ...[
+          const SizedBox(height: 20),
+          SleepStageHypnogram(session: latestSession),
+        ],
+
         const SizedBox(height: 24),
 
         Text('Duration — Last 14 Nights',
@@ -111,7 +132,7 @@ class _SleepContent extends StatelessWidget {
 
         if (chartData.values.any((v) => v > 0))
           LineMetricChart(
-            data: chartData.map((k, v) => MapEntry(k, v > 0 ? v : 0)),
+            data: chartData.map((k, v) => MapEntry<String, double>(k, v > 0 ? v : 0.0)),
             color: AppTheme.sleepColor,
           )
         else

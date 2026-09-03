@@ -7,9 +7,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/routes.dart';
 import '../../../core/models/health_connection.dart';
+import '../../../core/models/user_goals.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../dashboard/cubit/dashboard_cubit.dart';
+import '../../goals/cubit/goals_cubit.dart';
+import '../../goals/cubit/goals_state.dart';
+import '../../goals/presentation/edit_goals_sheet.dart';
 import '../../health_connection/cubit/health_connection_cubit.dart';
 import '../../../repositories/health_repository.dart';
 
@@ -78,6 +82,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _clearData() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear All Health Data?'),
+        content: const Text(
+          'This will purge all cached daily and sleep documents from Firestore.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child:
+                const Text('Clear', style: TextStyle(color: Color(0xFFEF4444))),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final healthRepo = HealthRepository();
+    await healthRepo.clearAllHealthData();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All data cleared from Firestore')),
+      );
+      setState(() {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthBloc>().state;
@@ -114,6 +152,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           const SizedBox(height: 20),
 
+          // Daily Goals Configuration
+          const _GoalsCard(),
+
+          const SizedBox(height: 20),
+
           // Sign out
           OutlinedButton.icon(
             onPressed: _signOut,
@@ -129,39 +172,154 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
   }
+}
 
-  Future<void> _clearData() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Clear All Health Data?'),
-        content: const Text(
-          'This will purge all cached daily and sleep documents from Firestore.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+class _GoalsCard extends StatelessWidget {
+  const _GoalsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final goalsState = context.watch<GoalsCubit>().state;
+    final goals = goalsState is GoalsLoaded
+        ? goalsState.goals
+        : UserGoals.defaultGoals;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6C63FF).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.track_changes_rounded,
+                  color: Color(0xFF6C63FF),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Daily Fitness Goals',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Targets powering your dashboard',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white60,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton.filledTonal(
+                onPressed: () => EditGoalsSheet.show(context),
+                icon: const Icon(Icons.edit_rounded, size: 18),
+                tooltip: 'Edit Goals',
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child:
-                const Text('Clear', style: TextStyle(color: Color(0xFFEF4444))),
+          const SizedBox(height: 18),
+          Divider(color: Colors.white.withValues(alpha: 0.06), height: 1),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _GoalSummaryItem(
+                  label: 'Steps',
+                  value:
+                      '${(goals.stepGoal / 1000).toStringAsFixed(goals.stepGoal % 1000 == 0 ? 0 : 1)}k',
+                  icon: Icons.directions_walk_rounded,
+                  color: const Color(0xFF6C63FF),
+                ),
+              ),
+              Expanded(
+                child: _GoalSummaryItem(
+                  label: 'Calories',
+                  value: '${goals.calorieGoal}',
+                  icon: Icons.local_fire_department_rounded,
+                  color: const Color(0xFFFF6584),
+                ),
+              ),
+              Expanded(
+                child: _GoalSummaryItem(
+                  label: 'Sleep',
+                  value: '${goals.sleepHoursGoal.toStringAsFixed(1)}h',
+                  icon: Icons.bedtime_rounded,
+                  color: const Color(0xFF43BCCD),
+                ),
+              ),
+              Expanded(
+                child: _GoalSummaryItem(
+                  label: 'Active',
+                  value: '${goals.activeMinutesGoal}m',
+                  icon: Icons.bolt_rounded,
+                  color: const Color(0xFF00C896),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
+  }
+}
 
-    if (confirmed != true) return;
+class _GoalSummaryItem extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
 
-    final healthRepo = HealthRepository();
-    await healthRepo.clearAllHealthData();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All data cleared from Firestore')),
-      );
-      setState(() {});
-    }
+  const _GoalSummaryItem({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 11,
+            color: Colors.white54,
+          ),
+        ),
+      ],
+    );
   }
 }
 

@@ -9,6 +9,7 @@ import '../../../core/models/exercise_record.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../../shared/widgets/metric_chart.dart';
 import '../../../shared/widgets/error_view.dart';
+import '../../health_connection/cubit/health_connection_cubit.dart';
 import '../cubit/activity_cubit.dart';
 
 class ActivityScreen extends StatelessWidget {
@@ -18,22 +19,32 @@ class ActivityScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Activity')),
-      body: BlocBuilder<ActivityCubit, ActivityState>(
-        builder: (context, state) {
-          if (state.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await context
+              .read<HealthConnectionCubit>()
+              .syncHealthData(fullHistory: true);
+          if (context.mounted) {
+            context.read<ActivityCubit>().refresh();
           }
-          if (state.errorMessage != null) {
-            return ErrorView(
-              message: 'Failed to load activity data.',
-              onRetry: () => context.read<ActivityCubit>().refresh(),
-            );
-          }
-          return _ActivityContent(
-            days: state.history,
-            exercises: state.exercises,
-          );
         },
+        child: BlocBuilder<ActivityCubit, ActivityState>(
+          builder: (context, state) {
+            if (state.isLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (state.errorMessage != null) {
+              return ErrorView(
+                message: 'Failed to load activity data.',
+                onRetry: () => context.read<ActivityCubit>().refresh(),
+              );
+            }
+            return _ActivityContent(
+              days: state.history,
+              exercises: state.exercises,
+            );
+          },
+        ),
       ),
     );
   }
@@ -58,6 +69,7 @@ class _ActivityContent extends StatelessWidget {
     };
 
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
         // Summary row

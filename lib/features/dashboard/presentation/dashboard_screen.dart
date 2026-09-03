@@ -7,7 +7,10 @@ import 'package:go_router/go_router.dart';
 import '../../../app/routes.dart';
 import '../../../app/theme.dart';
 import '../../../core/models/health_daily.dart';
+import '../../../core/models/user_goals.dart';
 import '../../../core/utils/date_utils.dart';
+import '../../goals/cubit/goals_cubit.dart';
+import '../../goals/cubit/goals_state.dart';
 import '../../health_connection/cubit/health_connection_cubit.dart';
 import '../cubit/dashboard_cubit.dart';
 import '../../../shared/widgets/health_card.dart';
@@ -21,6 +24,10 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final connectionState = context.watch<HealthConnectionCubit>().state;
     final dashboardState = context.watch<DashboardCubit>().state;
+    final goalsState = context.watch<GoalsCubit>().state;
+    final goals = goalsState is GoalsLoaded
+        ? goalsState.goals
+        : UserGoals.defaultGoals;
 
     final isConnected = connectionState.isConnected;
     final today = dashboardState.today;
@@ -28,138 +35,158 @@ class DashboardScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: CustomScrollView(
-        slivers: [
-          // App Bar
-          SliverAppBar(
-            floating: true,
-            pinned: false,
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _greeting(),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.55),
-                      ),
-                ),
-                const Text(
-                  'Your Health Today',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await context
+              .read<HealthConnectionCubit>()
+              .syncHealthData(fullHistory: true);
+          if (context.mounted) {
+            context.read<DashboardCubit>().refresh();
+          }
+        },
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            // App Bar
+            SliverAppBar(
+              floating: true,
+              pinned: false,
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _greeting(),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.55),
+                        ),
                   ),
+                  const Text(
+                    'Your Health Today',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.sync_rounded, color: Colors.white70),
+                  tooltip: 'Sync Health Data',
+                  onPressed: () async {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Syncing health data...'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                    try {
+                      await context
+                          .read<HealthConnectionCubit>()
+                          .syncHealthData(fullHistory: true);
+                      if (context.mounted) {
+                        context.read<DashboardCubit>().refresh();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Health data synchronized!'),
+                            backgroundColor: AppTheme.successColor,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Sync error: $e'),
+                            backgroundColor: AppTheme.warningColor,
+                          ),
+                        );
+                      }
+                    }
+                  },
                 ),
+                if (!isConnected)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: ElevatedButton.icon(
+                      onPressed: () => context.go(AppRoute.connect),
+                      icon: const Icon(Icons.link_rounded, size: 16),
+                      label: const Text('Connect'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ),
               ],
             ),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.sync_rounded, color: Colors.white70),
-                tooltip: 'Sync Health Data',
-                onPressed: () async {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Syncing health data...'),
-                      duration: Duration(seconds: 1),
+
+            // Content
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  // Offline / last-updated banner
+                  if (today?.updatedAt != null)
+                    _LastUpdatedBanner(updatedAt: today!.updatedAt!),
+
+                  // Not connected banner
+                  if (!isConnected && !connectionState.isLoading)
+                    _NotConnectedBanner(
+                        onConnect: () => context.go(AppRoute.connect)),
+
+                  const SizedBox(height: 16),
+
+                  // Goal celebration banner if user hit or exceeded daily step goal
+                  if (today != null &&
+                      today.steps != null &&
+                      today.steps! >= goals.stepGoal)
+                    _GoalCelebrationBanner(
+                      steps: today.steps!,
+                      goal: goals.stepGoal,
                     ),
-                  );
-                  try {
-                    await context
-                        .read<HealthConnectionCubit>()
-                        .syncHealthData(fullHistory: true);
-                    if (context.mounted) {
-                      context.read<DashboardCubit>().refresh();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Health data synchronized!'),
-                          backgroundColor: AppTheme.successColor,
-                        ),
-                      );
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Sync error: $e'),
-                          backgroundColor: AppTheme.warningColor,
-                        ),
-                      );
-                    }
-                  }
-                },
-              ),
-              if (!isConnected)
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: ElevatedButton.icon(
-                    onPressed: () => context.go(AppRoute.connect),
-                    icon: const Icon(Icons.link_rounded, size: 16),
-                    label: const Text('Connect'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 8),
-                      textStyle: const TextStyle(fontSize: 13),
-                    ),
-                  ),
-                ),
-            ],
-          ),
 
-          // Content
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                // Offline / last-updated banner
-                if (today?.updatedAt != null)
-                  _LastUpdatedBanner(updatedAt: today!.updatedAt!),
+                  // Metric cards grid
+                  if (dashboardState.isLoading)
+                    _MetricGrid(today: null, isLoading: true, goals: goals)
+                  else if (dashboardState.errorMessage != null)
+                    ErrorView(
+                      message:
+                          'Could not load health data. Check your connection.',
+                      onRetry: () => context.read<DashboardCubit>().refresh(),
+                    )
+                  else
+                    _MetricGrid(today: today, isLoading: false, goals: goals),
 
-                // Not connected banner
-                if (!isConnected && !connectionState.isLoading)
-                  _NotConnectedBanner(
-                      onConnect: () => context.go(AppRoute.connect)),
+                  const SizedBox(height: 28),
 
-                const SizedBox(height: 16),
-
-                // Metric cards grid
-                if (dashboardState.isLoading)
-                  const _MetricGrid(today: null, isLoading: true)
-                else if (dashboardState.errorMessage != null)
-                  ErrorView(
-                    message:
-                        'Could not load health data. Check your connection.',
-                    onRetry: () => context.read<DashboardCubit>().refresh(),
-                  )
-                else
-                  _MetricGrid(today: today, isLoading: false),
-
-                const SizedBox(height: 28),
-
-                // Steps 7-day chart
-                const _SectionHeader(
-                  title: 'Steps — Last 7 Days',
-                  color: AppTheme.stepsColor,
-                ),
-                const SizedBox(height: 12),
-                if (dashboardState.isLoading)
-                  const SizedBox(height: 160)
-                else if (stepsChart.values.any((v) => v > 0))
-                  StepsBarChart(
-                    data: stepsChart,
+                  // Steps 7-day chart
+                  const _SectionHeader(
+                    title: 'Steps — Last 7 Days',
                     color: AppTheme.stepsColor,
-                    goal: 10000,
-                  )
-                else
-                  const EmptyDataView(
-                    message:
-                        'No step data yet. Connect your Fitbit to start tracking.',
-                    icon: Icons.directions_walk_rounded,
                   ),
-              ]),
+                  const SizedBox(height: 12),
+                  if (dashboardState.isLoading)
+                    const SizedBox(height: 160)
+                  else if (stepsChart.values.any((v) => v > 0))
+                    StepsBarChart(
+                      data: stepsChart,
+                      color: AppTheme.stepsColor,
+                      goal: goals.stepGoal,
+                    )
+                  else
+                    const EmptyDataView(
+                      message:
+                          'No step data yet. Connect your Fitbit to start tracking.',
+                      icon: Icons.directions_walk_rounded,
+                    ),
+                ]),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -177,13 +204,34 @@ class DashboardScreen extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _MetricGrid extends StatelessWidget {
-  const _MetricGrid({required this.today, required this.isLoading});
+  const _MetricGrid({
+    required this.today,
+    required this.isLoading,
+    required this.goals,
+  });
 
   final HealthDaily? today;
   final bool isLoading;
+  final UserGoals goals;
 
   @override
   Widget build(BuildContext context) {
+    final stepPercent = today?.steps != null
+        ? (today!.steps! / goals.stepGoal * 100).round()
+        : null;
+
+    final calPercent = today?.calories != null && today!.calories! > 0
+        ? (today!.calories! / goals.calorieGoal * 100).round()
+        : null;
+
+    final activePercent = today?.activeMinutes != null && today!.activeMinutes! > 0
+        ? (today!.activeMinutes! / goals.activeMinutesGoal * 100).round()
+        : null;
+
+    final sleepHours = today?.sleepMinutes != null && today!.sleepMinutes! > 0
+        ? (today!.sleepMinutes! / 60)
+        : null;
+
     return GridView.count(
       crossAxisCount: 2,
       shrinkWrap: true,
@@ -195,8 +243,8 @@ class _MetricGrid extends StatelessWidget {
         HealthCard(
           title: 'Steps',
           value: today?.steps != null ? _fmt(today!.steps!) : '--',
-          subtitle: today?.steps != null
-              ? '${(today!.steps! / 10000 * 100).toStringAsFixed(0)}% of goal'
+          subtitle: stepPercent != null
+              ? '$stepPercent% of ${_fmt(goals.stepGoal)} goal'
               : null,
           icon: Icons.directions_walk_rounded,
           color: AppTheme.stepsColor,
@@ -208,6 +256,9 @@ class _MetricGrid extends StatelessWidget {
           value: today?.calories != null && today!.calories! > 0
               ? '${_fmt(today!.calories!)} kcal'
               : '--',
+          subtitle: calPercent != null
+              ? '$calPercent% of ${_fmt(goals.calorieGoal)} kcal'
+              : null,
           icon: Icons.local_fire_department_rounded,
           color: AppTheme.caloriesColor,
           isLoading: isLoading,
@@ -229,6 +280,9 @@ class _MetricGrid extends StatelessWidget {
           value: today?.activeMinutes != null && today!.activeMinutes! > 0
               ? '${today!.activeMinutes} min'
               : '--',
+          subtitle: activePercent != null
+              ? '$activePercent% of ${goals.activeMinutesGoal}m'
+              : null,
           icon: Icons.bolt_rounded,
           color: AppTheme.activeColor,
           isLoading: isLoading,
@@ -252,8 +306,9 @@ class _MetricGrid extends StatelessWidget {
         HealthCard(
           title: 'Sleep',
           value: HealthDateUtils.formatSleepMinutes(today?.sleepMinutes),
-          subtitle:
-              today?.sleepScore != null ? 'Score: ${today!.sleepScore}' : null,
+          subtitle: sleepHours != null
+              ? '${sleepHours.toStringAsFixed(1)}h / ${goals.sleepHoursGoal.toStringAsFixed(1)}h goal'
+              : (today?.sleepScore != null ? 'Score: ${today!.sleepScore}' : null),
           icon: Icons.bedtime_rounded,
           color: AppTheme.sleepColor,
           isLoading: isLoading,
@@ -264,11 +319,72 @@ class _MetricGrid extends StatelessWidget {
     );
   }
 
-  String _fmt(int n) {
+  static String _fmt(int n) {
     if (n >= 1000) {
       return '${(n / 1000).toStringAsFixed(n % 1000 == 0 ? 0 : 1)}k';
     }
     return n.toString();
+  }
+}
+
+class _GoalCelebrationBanner extends StatelessWidget {
+  final int steps;
+  final int goal;
+
+  const _GoalCelebrationBanner({required this.steps, required this.goal});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF6C63FF), Color(0xFF00C896)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF6C63FF).withValues(alpha: 0.35),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Text('🎉', style: TextStyle(fontSize: 26)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Daily Step Goal Reached!',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Amazing job! You crushed your target with $steps / $goal steps today.',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 24),
+        ],
+      ),
+    );
   }
 }
 
