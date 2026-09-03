@@ -60,8 +60,8 @@ jobs:
         working-directory: functions
         run: npm run build
 
-  build-debug-apk:
-    name: Build Android APK
+  build-apk:
+    name: Build Android Release APK
     needs: [flutter-test]
     runs-on: ubuntu-latest
 
@@ -90,13 +90,13 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build Debug APK
-        run: flutter build apk --debug
+      - name: Build Release APK
+        run: flutter build apk --release
 
-      - name: Upload Android APK
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: fitbit-health-dashboard-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: fitbit-health-dashboard-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
