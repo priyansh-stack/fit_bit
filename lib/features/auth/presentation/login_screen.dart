@@ -44,6 +44,13 @@ class _LoginScreenState extends State<LoginScreen>
       curve: Curves.easeOutCubic,
     ));
     _animController.forward();
+
+    final authState = context.read<AuthBloc>().state;
+    if (authState is Authenticated) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.go(AppRoute.home);
+      });
+    }
   }
 
   @override
@@ -97,7 +104,13 @@ class _LoginScreenState extends State<LoginScreen>
     if (str.contains('10') || str.contains('DEVELOPER_ERROR')) {
       return 'Google Sign-In needs your debug SHA-1 added to Firebase Console.\n\nDebug SHA-1:\nB4:81:52:24:7B:1C:20:9E:A8:0D:01:0D:AF:80:26:61:9E:45:5B:CD';
     }
-    return str;
+    if (str.contains('Invalid Value') || str.contains('invalid-credential')) {
+      return 'Sign-in credential validation failed. Please retry or use Demo Mode.';
+    }
+    if (str.contains('network_error') || str.contains('Network error')) {
+      return 'Network connection issue. Please check your internet connection.';
+    }
+    return str.replaceAll(RegExp(r'[\{\}\[\]"]'), '').trim();
   }
 
   @override

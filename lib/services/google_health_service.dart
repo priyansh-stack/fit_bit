@@ -39,6 +39,22 @@ class GoogleHealthCredentials {
   bool get isExpiredOrExpiring =>
       DateTime.now().isAfter(tokenExpiry.subtract(const Duration(seconds: 60)));
 
+  GoogleHealthCredentials copyWith({
+    String? accessToken,
+    String? refreshToken,
+    DateTime? tokenExpiry,
+    List<String>? grantedScopes,
+    String? userId,
+  }) {
+    return GoogleHealthCredentials(
+      accessToken: accessToken ?? this.accessToken,
+      refreshToken: refreshToken ?? this.refreshToken,
+      tokenExpiry: tokenExpiry ?? this.tokenExpiry,
+      grantedScopes: grantedScopes ?? this.grantedScopes,
+      userId: userId ?? this.userId,
+    );
+  }
+
   Map<String, dynamic> toJson() => {
         'accessToken': accessToken,
         if (refreshToken != null) 'refreshToken': refreshToken,
@@ -138,9 +154,7 @@ class GoogleHealthSession {
 }
 
 class GoogleHealthConnector {
-  GoogleHealthConnector({
-    http.Client? client,
-  }) : _client = client ?? http.Client();
+  GoogleHealthConnector({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
 
@@ -172,25 +186,51 @@ class GoogleHealthConnector {
     required String clientId,
     required String clientSecret,
     required String redirectUri,
+    String? codeVerifier,
+  }) =>
+      exchangeCodeForTokens(
+        code: code,
+        clientId: clientId,
+        clientSecret: clientSecret,
+        redirectUri: redirectUri,
+        codeVerifier: codeVerifier,
+      );
+
+  /// Exchanges an OAuth 2.0 authorization code for access and refresh tokens.
+  Future<GoogleHealthCredentials> exchangeCodeForTokens({
+    required String code,
+    required String clientId,
+    required String clientSecret,
+    required String redirectUri,
+    String? codeVerifier,
   }) async {
+    final effectiveSecret = clientSecret.isNotEmpty
+        ? clientSecret
+        : await OAuthConstants.resolveClientSecret();
+
+    final body = {
+      'code': code,
+      'client_id': clientId,
+      'client_secret': effectiveSecret,
+      'redirect_uri': redirectUri,
+      'grant_type': 'authorization_code',
+    };
+    if (codeVerifier != null) {
+      body['code_verifier'] = codeVerifier;
+    }
+
     final response = await _client.post(
       Uri.parse(OAuthConstants.tokenEndpoint),
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-      body: {
-        'code': code,
-        'client_id': clientId,
-        'client_secret': clientSecret,
-        'redirect_uri': redirectUri,
-        'grant_type': 'authorization_code',
-      },
+      body: body,
     ).timeout(const Duration(seconds: 30));
 
     if (response.statusCode != 200) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
-      final errorMsg =
-          body['error_description'] ?? body['error'] ?? response.body;
-      throw HealthConnectionException(
-        message: 'Google Health token exchange failed: $errorMsg',
+      final errorData = jsonDecode(response.body) as Map<String, dynamic>?;
+      final errorDesc =
+          errorData?['error_description'] ?? errorData?['error'] ?? 'Unknown error';
+      throw OAuthFailedException(
+        message: 'Token exchange failed: $errorDesc',
       );
     }
 
@@ -225,21 +265,32 @@ class GoogleHealthConnector {
       );
     }
 
+    final effectiveSecret = clientSecret.isNotEmpty
+        ? clientSecret
+        : await OAuthConstants.resolveClientSecret();
+
     final response = await _client.post(
       Uri.parse(OAuthConstants.tokenEndpoint),
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: {
         'client_id': clientId,
-        'client_secret': clientSecret,
+        'client_secret': effectiveSecret,
         'refresh_token': creds.refreshToken!,
         'grant_type': 'refresh_token',
       },
     ).timeout(const Duration(seconds: 30));
 
     if (response.statusCode == 400 || response.statusCode == 401) {
-      await GoogleHealthSession.logout();
-      throw const TokenRevokedException(
-        message: 'Authorization expired or revoked. Please reconnect.',
+      final body = response.body;
+      debugPrint('[GoogleHealthConnector] Token refresh rejected HTTP ${response.statusCode}: $body');
+      if (body.contains('invalid_grant')) {
+        await GoogleHealthSession.logout();
+        throw const TokenRevokedException(
+          message: 'Authorization expired or revoked. Please reconnect.',
+        );
+      }
+      throw HealthConnectionException(
+        message: 'Token refresh failed (${response.statusCode}): $body',
       );
     }
 
@@ -427,6 +478,35 @@ abstract class BaseGoogleHealthDataManager<T> {
 
     debugPrint(
         '[GoogleHealth] HTTP ${response.statusCode} on ${url.url}\nPayload: ${jsonEncode(url.requestBody)}\nResponse: ${response.body}');
+
+    if (response.statusCode == 401 && credentials.refreshToken != null) {
+      try {
+        final forcedRefresh = await _connector.refreshTokenIfNeeded(
+          credentials.copyWith(
+            tokenExpiry: DateTime.now().subtract(const Duration(minutes: 5)),
+          ),
+          clientId: clientId,
+          clientSecret: resolvedSecret,
+        );
+        credentials = forcedRefresh;
+        headers['Authorization'] = 'Bearer ${credentials.accessToken}';
+        final retryResponse = url.isRollUp
+            ? await _client.post(
+                requestUri,
+                headers: headers,
+                body: jsonEncode(url.requestBody ?? {}),
+              ).timeout(const Duration(seconds: 30))
+            : await _client.get(
+                requestUri,
+                headers: headers,
+              ).timeout(const Duration(seconds: 30));
+        if (retryResponse.statusCode == 200) {
+          response = retryResponse;
+        }
+      } catch (refreshErr) {
+        debugPrint('[GoogleHealth] 401 refresh retry failed: $refreshErr');
+      }
+    }
 
     if (response.statusCode == 401) {
       throw const TokenRevokedException(

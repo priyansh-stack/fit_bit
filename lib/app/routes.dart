@@ -56,7 +56,7 @@ GoRouter createAppRouter(AuthBloc authBloc) {
 
       final authState = authBloc.state;
       // Do not prematurely redirect to login while checking persisted session
-      if (authState is AuthInitial) {
+      if (authState is AuthInitial || authState is AuthLoading) {
         return null;
       }
 

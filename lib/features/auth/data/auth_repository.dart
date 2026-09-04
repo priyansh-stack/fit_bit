@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+import '../../../core/constants/oauth_constants.dart';
 import '../../../core/errors/app_exception.dart';
 
 /// Handles Firebase Authentication with Google Sign-In.
@@ -17,6 +18,7 @@ class AuthRepository {
         _firestore = firestore ?? FirebaseFirestore.instance,
         _googleSignIn = googleSignIn ??
             GoogleSignIn(
+              serverClientId: OAuthConstants.firebaseWebClientId,
               scopes: ['email', 'profile'],
             );
 

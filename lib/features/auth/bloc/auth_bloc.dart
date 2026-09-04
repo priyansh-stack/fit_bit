@@ -38,15 +38,22 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
 
     try {
-      // Give native Android Firebase SDK time to restore persisted auth tokens on cold start
+      // Give native Android Firebase SDK time to restore persisted auth tokens on cold start.
+      // Wait specifically for a non-null User rather than taking the initial null synchronous event.
       final restoredUser = await _authRepository.authStateChanges
-          .first
-          .timeout(const Duration(milliseconds: 1500));
+          .firstWhere((u) => u != null)
+          .timeout(const Duration(milliseconds: 2500));
       if (restoredUser != null) {
         emit(Authenticated(restoredUser));
         return;
       }
     } catch (_) {}
+
+    final fallbackUser = _authRepository.currentUser;
+    if (fallbackUser != null) {
+      emit(Authenticated(fallbackUser));
+      return;
+    }
 
     emit(const Unauthenticated());
   }

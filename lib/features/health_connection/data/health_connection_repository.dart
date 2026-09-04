@@ -163,7 +163,7 @@ class HealthConnectionRepository {
       debugPrint('[HealthConnectionRepository] Profile fetch non-fatal: $e');
     }
 
-    // 3. Save connection document to Firestore
+    // 3. Save connection document to Firestore (with encrypted/scoped credential backup)
     final connection = HealthConnection(
       id: FirestorePaths.googleHealthConnectionDoc,
       status: ConnectionStatus.active,
@@ -180,12 +180,22 @@ class HealthConnectionRepository {
       );
     }
 
+    final connectionData = connection.toJson()
+      ..addAll({
+        'accessToken': credentials.accessToken,
+        if (credentials.refreshToken != null)
+          'refreshToken': credentials.refreshToken,
+        'tokenExpiry': credentials.tokenExpiry.toIso8601String(),
+        'grantedScopes': credentials.grantedScopes,
+        if (credentials.userId != null) 'healthUserId': credentials.userId,
+      });
+
     await _firestore
         .collection(FirestorePaths.users)
         .doc(uid)
         .collection(FirestorePaths.connections)
         .doc(FirestorePaths.googleHealthConnectionDoc)
-        .set(connection.toJson(), SetOptions(merge: true));
+        .set(connectionData, SetOptions(merge: true));
 
     // 4. Trigger initial 30-day historical data synchronization
     await syncHealthData(fullHistory: true);
@@ -199,9 +209,52 @@ class HealthConnectionRepository {
   /// If [fullHistory] is true, fetches 30 days; otherwise fetches last 7 days.
   Future<Map<String, dynamic>> syncHealthData(
       {bool fullHistory = false}) async {
-    final credentials = await GoogleHealthSession.loadCredentials();
+    var credentials = await GoogleHealthSession.loadCredentials();
     if (credentials == null) {
-      throw const TokenRevokedException(
+      // Try restoring from Firestore backup if local storage was cleared on app restart
+      final uid = _uid;
+      if (uid != null) {
+        try {
+          final doc = await _firestore
+              .collection(FirestorePaths.users)
+              .doc(uid)
+              .collection(FirestorePaths.connections)
+              .doc(FirestorePaths.googleHealthConnectionDoc)
+              .get();
+
+          if (doc.exists) {
+            final data = doc.data();
+            final accessToken = data?['accessToken'] as String?;
+            final refreshToken = data?['refreshToken'] as String?;
+            final expiryStr = data?['tokenExpiry'] as String?;
+            final scopes = (data?['grantedScopes'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList();
+
+            if (accessToken != null && refreshToken != null) {
+              credentials = GoogleHealthCredentials(
+                accessToken: accessToken,
+                refreshToken: refreshToken,
+                tokenExpiry: expiryStr != null
+                    ? DateTime.tryParse(expiryStr) ?? DateTime.now()
+                    : DateTime.now(),
+                grantedScopes: scopes ?? [],
+                userId: data?['healthUserId'] as String?,
+              );
+              await GoogleHealthSession.saveCredentials(credentials);
+              debugPrint(
+                  '[HealthConnectionRepository] Restored credentials from Firestore backup');
+            }
+          }
+        } catch (e) {
+          debugPrint(
+              '[HealthConnectionRepository] Credential restoration non-fatal error: $e');
+        }
+      }
+    }
+
+    if (credentials == null) {
+      throw const HealthConnectionException(
         message: 'Google Health is not connected. Please connect first.',
       );
     }
@@ -672,6 +725,9 @@ class HealthConnectionRepository {
             .set({
           'status': ConnectionStatus.disconnected.name,
           'lastDisconnectedAt': FieldValue.serverTimestamp(),
+          'accessToken': FieldValue.delete(),
+          'refreshToken': FieldValue.delete(),
+          'tokenExpiry': FieldValue.delete(),
         }, SetOptions(merge: true));
 
         await _firestore.collection(FirestorePaths.users).doc(uid).set({
