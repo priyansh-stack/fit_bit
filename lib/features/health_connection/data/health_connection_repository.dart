@@ -258,6 +258,12 @@ class HealthConnectionRepository {
         message: 'Google Health is not connected. Please connect first.',
       );
     }
+    final resolvedSecret = await OAuthConstants.resolveClientSecret();
+    final GoogleHealthCredentials creds = await _connector.refreshTokenIfNeeded(
+      credentials,
+      clientId: OAuthConstants.clientId,
+      clientSecret: resolvedSecret,
+    );
 
     await _healthRepository.updateSyncStatus(
       syncType: FirestorePaths.syncFull,
@@ -270,16 +276,20 @@ class HealthConnectionRepository {
     final yesterdayStr = DateFormat('yyyy-MM-dd').format(yesterdayDate);
     final todayMidnight = DateTime(now.year, now.month, now.day);
 
-    // 1. Retrieve existing Firestore summaries so we can perform incremental sync
+    // 1. Retrieve existing Firestore summaries in parallel so we can perform incremental sync
     // and avoid re-fetching or modifying finalized past data.
-    final existingDailies = await _healthRepository.getRecentDailySummaries(
-      days: fullHistory
-          ? AppConstants.initialSyncDays
-          : AppConstants.dashboardChartDays * 2,
-    );
-    final existingSleeps = await _healthRepository.getRecentSleepRecords(
-      limit: fullHistory ? AppConstants.initialSyncDays : 14,
-    );
+    final initialReads = await Future.wait([
+      _healthRepository.getRecentDailySummaries(
+        days: fullHistory
+            ? AppConstants.initialSyncDays
+            : AppConstants.dashboardChartDays * 2,
+      ),
+      _healthRepository.getRecentSleepRecords(
+        limit: fullHistory ? AppConstants.initialSyncDays : 14,
+      ),
+    ]);
+    final existingDailies = initialReads[0] as Map<String, HealthDaily>;
+    final existingSleeps = initialReads[1] as Map<String, SleepRecord>;
 
     // 2. Compute the exact incremental date range to query from the APIs.
     DateTime startDate;
@@ -378,345 +388,388 @@ class HealthConnectionRepository {
       );
     }
 
+    // Atomic synchronous updater to prevent race conditions during parallel fetches
+    void updateBucket(
+        String date, HealthDaily Function(HealthDaily current) updater) {
+      final current = getBucket(date);
+      dailyBuckets[date] = updater(current);
+    }
+
+    // Pre-seed daily buckets for the active sync window
+    for (DateTime d = startDate;
+        !d.isAfter(endDate);
+        d = d.add(const Duration(days: 1))) {
+      final dateStr = DateFormat('yyyy-MM-dd').format(d);
+      if (!isDateFinalized(dateStr)) {
+        getBucket(dateStr);
+      }
+    }
+
     try {
       // -----------------------------------------------------------------------
-      // A. Real-time Google Fitness REST API (legacy fallback if granted)
+      // Run independent data fetches CONCURRENTLY for maximum speed
       // -----------------------------------------------------------------------
-      final hasFitnessScope =
-          credentials.grantedScopes.any((s) => s.contains('fitness'));
-      if (hasFitnessScope) {
-        try {
-          debugPrint(
-              '[syncHealthData] Querying Google Fitness API for $startDate to $endDate...');
-          final fitnessDailies = await _fitnessService.fetchDailyAggregates(
-            credentials: credentials,
-            startDate: startDate,
-            endDate: endDate,
-          );
+      await Future.wait([
+        // ---------------------------------------------------------------------
+        // A. Google Fitness REST API (legacy fallback if granted)
+        // ---------------------------------------------------------------------
+        () async {
+          final hasFitnessScope =
+              creds.grantedScopes.any((s) => s.contains('fitness'));
+          if (!hasFitnessScope) return;
+          try {
+            debugPrint(
+                '[syncHealthData] Querying Google Fitness API for $startDate to $endDate...');
+            final fitnessDailies = await _fitnessService.fetchDailyAggregates(
+              credentials: creds,
+              startDate: startDate,
+              endDate: endDate,
+            );
 
-          for (final item in fitnessDailies) {
-            if (item.date.isEmpty) continue;
-            if (isDateFinalized(item.date)) continue;
-            dailyBuckets[item.date] = item;
-          }
-
-          final sleepSessions = await _fitnessService.fetchSleepSessions(
-            credentials: credentials,
-            startDate: startDate,
-            endDate: endDate,
-          );
-
-          for (final sleep in sleepSessions) {
-            if (isDateFinalized(sleep.date)) continue;
-            if (!existingSleeps.containsKey(sleep.date)) {
-              await _healthRepository.saveSleepRecord(sleep);
+            for (final item in fitnessDailies) {
+              if (item.date.isEmpty) continue;
+              if (isDateFinalized(item.date)) continue;
+              updateBucket(item.date, (_) => item);
             }
-            final existing = getBucket(sleep.date);
-            dailyBuckets[sleep.date] = existing.copyWith(
-              sleepMinutes:
-                  (existing.sleepMinutes ?? 0) + sleep.durationMinutes,
+
+            final sleepSessions = await _fitnessService.fetchSleepSessions(
+              credentials: creds,
+              startDate: startDate,
+              endDate: endDate,
             );
+
+            for (final sleep in sleepSessions) {
+              if (isDateFinalized(sleep.date)) continue;
+              if (!existingSleeps.containsKey(sleep.date)) {
+                await _healthRepository.saveSleepRecord(sleep);
+              }
+              updateBucket(
+                sleep.date,
+                (cur) => cur.copyWith(
+                  sleepMinutes: (cur.sleepMinutes ?? 0) + sleep.durationMinutes,
+                ),
+              );
+            }
+          } catch (e) {
+            debugPrint('[syncHealthData] Google Fitness sync error: $e');
           }
-          debugPrint(
-              '[syncHealthData] Google Fitness query completed: ${fitnessDailies.length} days returned');
-        } catch (e) {
-          debugPrint('[syncHealthData] Google Fitness sync error: $e');
-        }
-      }
+        }(),
 
-      // -----------------------------------------------------------------------
-      // B. Activity: Steps (RollUp)
-      // -----------------------------------------------------------------------
-      try {
-        final stepsManager =
-            GoogleHealthStepsDataManager(credentials: credentials);
-        final stepsResult = await stepsManager.fetch(
-          GoogleHealthStepsAPIURL.dateRange(
-            startDate: startDate,
-            endDate: endDate,
-          ),
-        );
-
-        final Map<String, int> dailyStepsSum = {};
-        final Map<String, double> dailyDistSum = {};
-        final Map<String, int> dailyCalSum = {};
-
-        for (final item in stepsResult.data) {
-          if (item.date.isEmpty) continue;
-          if (isDateFinalized(item.date)) continue;
-          dailyStepsSum[item.date] =
-              (dailyStepsSum[item.date] ?? 0) + item.countSum;
-          if (item.distanceMetersSum != null && item.distanceMetersSum! > 0) {
-            dailyDistSum[item.date] =
-                (dailyDistSum[item.date] ?? 0.0) + item.distanceMetersSum!;
-          }
-          if (item.caloriesSum != null && item.caloriesSum! > 0) {
-            dailyCalSum[item.date] =
-                (dailyCalSum[item.date] ?? 0) + item.caloriesSum!;
-          }
-        }
-
-        debugPrint(
-            '[syncHealthData] Steps aggregated: ${dailyStepsSum.length} dates -> $dailyStepsSum');
-
-        for (final entry in dailyStepsSum.entries) {
-          final date = entry.key;
-          if (isDateFinalized(date)) continue;
-          final stepCount = entry.value;
-          final existing = getBucket(date);
-          final estDistance =
-              (dailyDistSum[date] != null && dailyDistSum[date]! >= 10)
-                  ? dailyDistSum[date]!
-                  : (stepCount * 0.762);
-          final estCalories =
-              (dailyCalSum[date] != null && dailyCalSum[date]! > 0)
-                  ? dailyCalSum[date]!
-                  : (1400 + (stepCount * 0.04).round());
-
-          dailyBuckets[date] = existing.copyWith(
-            steps: stepCount,
-            distanceMeters: estDistance,
-            calories: estCalories,
-            source: 'google_health',
-          );
-        }
-      } catch (e) {
-        debugPrint('[syncHealthData] Steps sync warning: $e');
-      }
-
-      // -----------------------------------------------------------------------
-      // B. Activity: Active Minutes & Sedentary (RollUp)
-      // -----------------------------------------------------------------------
-      try {
-        final activeMinutesManager =
-            GoogleHealthActiveMinutesDataManager(credentials: credentials);
-        final activeResult = await activeMinutesManager.fetch(
-          GoogleHealthActiveMinutesAPIURL.dateRange(
-            startDate: startDate,
-            endDate: endDate,
-          ),
-        );
-
-        final Map<String, int> dailyActiveSum = {};
-        final Map<String, int> dailyActiveCalSum = {};
-
-        for (final item in activeResult.data) {
-          if (item.date.isEmpty) continue;
-          if (isDateFinalized(item.date)) continue;
-          dailyActiveSum[item.date] =
-              (dailyActiveSum[item.date] ?? 0) + item.activeMinutesSum;
-          if (item.activeCaloriesSum != null && item.activeCaloriesSum! > 0) {
-            dailyActiveCalSum[item.date] =
-                (dailyActiveCalSum[item.date] ?? 0) + item.activeCaloriesSum!;
-          }
-        }
-
-        for (final entry in dailyActiveSum.entries) {
-          final date = entry.key;
-          if (isDateFinalized(date)) continue;
-          final activeMin = entry.value;
-          final existing = getBucket(date);
-          final stepCount = existing.steps ?? 0;
-          final estActiveCal = dailyActiveCalSum[date] ??
-              ((stepCount * 0.04).round() + (activeMin * 4));
-          final estTotalCal =
-              (existing.calories != null && existing.calories! > 1400)
-                  ? (1400 + estActiveCal)
-                  : (1400 + estActiveCal);
-          dailyBuckets[date] = existing.copyWith(
-            activeMinutes: activeMin,
-            activeCalories: estActiveCal > 0 ? estActiveCal : null,
-            calories: estTotalCal,
-          );
-        }
-
-        final sedentaryManager =
-            GoogleHealthSedentaryPeriodDataManager(credentials: credentials);
-        final sedentaryResult = await sedentaryManager.fetch(
-          GoogleHealthSedentaryPeriodAPIURL.dateRange(
-            startDate: startDate,
-            endDate: endDate,
-          ),
-        );
-
-        final Map<String, int> dailySedentarySum = {};
-        for (final item in sedentaryResult.data) {
-          if (item.date.isEmpty) continue;
-          if (isDateFinalized(item.date)) continue;
-          dailySedentarySum[item.date] =
-              (dailySedentarySum[item.date] ?? 0) + item.sedentaryMinutesSum;
-        }
-
-        for (final entry in dailySedentarySum.entries) {
-          final date = entry.key;
-          if (isDateFinalized(date)) continue;
-          final sedentaryMin = entry.value;
-          final existing = getBucket(date);
-          dailyBuckets[date] = existing.copyWith(
-            sedentaryMinutes: sedentaryMin,
-          );
-        }
-      } catch (e) {
-        debugPrint('[syncHealthData] Active minutes warning: $e');
-      }
-
-      // -----------------------------------------------------------------------
-      // C. Cardiovascular: Resting Heart Rate & HRV (DataPoints)
-      // -----------------------------------------------------------------------
-      try {
-        final rhrManager =
-            GoogleHealthRestingHeartRateDataManager(credentials: credentials);
-        final rhrResult = await rhrManager.fetch(
-          GoogleHealthRestingHeartRateAPIURL.dateRange(
-            startDate: startDate,
-            endDate: endDate,
-          ),
-        );
-
-        final hrValuesPerDate = <String, List<int>>{};
-        for (final item in rhrResult.data) {
-          if (item.date.isEmpty || item.bpm <= 0) continue;
-          if (isDateFinalized(item.date)) continue;
-          hrValuesPerDate.putIfAbsent(item.date, () => []).add(item.bpm);
-        }
-        for (final entry in hrValuesPerDate.entries) {
-          final date = entry.key;
-          if (isDateFinalized(date)) continue;
-          final list = entry.value;
-          final avgBpm = list.reduce((a, b) => a + b) ~/ list.length;
-          final existing = getBucket(date);
-          final currentRhr = existing.restingHeartRate;
-          dailyBuckets[date] = existing.copyWith(
-            restingHeartRate:
-                (currentRhr != null && currentRhr > 0) ? currentRhr : avgBpm,
-          );
-        }
-
-        final hrvManager = GoogleHealthHrvDataManager(credentials: credentials);
-        final hrvResult = await hrvManager.fetch(
-          GoogleHealthHrvAPIURL.dateRange(
-            startDate: startDate,
-            endDate: endDate,
-          ),
-        );
-
-        for (final item in hrvResult.data) {
-          if (item.date.isEmpty) continue;
-          if (isDateFinalized(item.date)) continue;
-          final existing = getBucket(item.date);
-          dailyBuckets[item.date] = existing.copyWith(
-            avgHrv: item.rmssd,
-          );
-        }
-      } catch (e) {
-        debugPrint('[syncHealthData] Heart rate sync warning: $e');
-      }
-
-      // -----------------------------------------------------------------------
-      // D. Sleep: Sessions & Stages
-      // -----------------------------------------------------------------------
-      try {
-        final sleepManager =
-            GoogleHealthSleepDataManager(credentials: credentials);
-        final sleepResult = await sleepManager.fetch(
-          GoogleHealthSleepAPIURL.dateRange(
-            startDate: startDate,
-            endDate: endDate,
-          ),
-        );
-
-        for (final session in sleepResult.data) {
-          if (session.date.isEmpty) continue;
-          if (isDateFinalized(session.date)) continue;
-          final existing = getBucket(session.date);
-          dailyBuckets[session.date] = existing.copyWith(
-            sleepMinutes: session.durationMinutes,
-            sleepScore: session.sleepScore ?? existing.sleepScore,
-          );
-
-          // Save individual sleep session record if not already stored
-          if (!existingSleeps.containsKey(session.date)) {
-            final sleepRecord = SleepRecord(
-              date: session.date,
-              startTime: session.startTime,
-              endTime: session.endTime,
-              durationMinutes: session.durationMinutes,
-              awakeMinutes: session.awakeMinutes,
-              lightMinutes: session.lightMinutes,
-              deepMinutes: session.deepMinutes,
-              remMinutes: session.remMinutes,
-              sleepScore: session.sleepScore,
-              source: session.source ?? 'google_wearables',
-              updatedAt: now,
+        // ---------------------------------------------------------------------
+        // B. Activity: Steps (RollUp)
+        // ---------------------------------------------------------------------
+        () async {
+          try {
+            final stepsManager =
+                GoogleHealthStepsDataManager(credentials: creds);
+            final stepsResult = await stepsManager.fetch(
+              GoogleHealthStepsAPIURL.dateRange(
+                startDate: startDate,
+                endDate: endDate,
+              ),
             );
-            await _healthRepository.saveSleepRecord(sleepRecord);
+
+            final Map<String, int> dailyStepsSum = {};
+            final Map<String, double> dailyDistSum = {};
+            final Map<String, int> dailyCalSum = {};
+
+            for (final item in stepsResult.data) {
+              if (item.date.isEmpty) continue;
+              if (isDateFinalized(item.date)) continue;
+              dailyStepsSum[item.date] =
+                  (dailyStepsSum[item.date] ?? 0) + item.countSum;
+              if (item.distanceMetersSum != null &&
+                  item.distanceMetersSum! > 0) {
+                dailyDistSum[item.date] =
+                    (dailyDistSum[item.date] ?? 0.0) + item.distanceMetersSum!;
+              }
+              if (item.caloriesSum != null && item.caloriesSum! > 0) {
+                dailyCalSum[item.date] =
+                    (dailyCalSum[item.date] ?? 0) + item.caloriesSum!;
+              }
+            }
+
+            debugPrint(
+                '[syncHealthData] Steps aggregated: ${dailyStepsSum.length} dates -> $dailyStepsSum');
+
+            for (final entry in dailyStepsSum.entries) {
+              final date = entry.key;
+              if (isDateFinalized(date)) continue;
+              final stepCount = entry.value;
+              final estDistance =
+                  (dailyDistSum[date] != null && dailyDistSum[date]! >= 10)
+                      ? dailyDistSum[date]!
+                      : (stepCount * 0.762);
+              final estCalories =
+                  (dailyCalSum[date] != null && dailyCalSum[date]! > 0)
+                      ? dailyCalSum[date]!
+                      : (1400 + (stepCount * 0.04).round());
+
+              updateBucket(
+                date,
+                (cur) => cur.copyWith(
+                  steps: stepCount,
+                  distanceMeters: estDistance,
+                  calories: estCalories,
+                  source: 'google_health',
+                ),
+              );
+            }
+          } catch (e) {
+            debugPrint('[syncHealthData] Steps sync warning: $e');
           }
-        }
-      } catch (e) {
-        debugPrint('[syncHealthData] Sleep sync warning: $e');
-      }
+        }(),
 
-      // -----------------------------------------------------------------------
-      // E. Health Metrics: SpO2, Breathing Rate, Skin Temperature
-      // -----------------------------------------------------------------------
-      try {
-        final spo2Manager =
-            GoogleHealthOxygenSaturationDataManager(credentials: credentials);
-        final spo2Result = await spo2Manager.fetch(
-          GoogleHealthOxygenSaturationAPIURL.dateRange(
-            startDate: startDate,
-            endDate: endDate,
-          ),
-        );
-        for (final item in spo2Result.data) {
-          if (item.date.isEmpty) continue;
-          if (isDateFinalized(item.date)) continue;
-          final existing = getBucket(item.date);
-          dailyBuckets[item.date] = existing.copyWith(avgSpo2: item.percentage);
-        }
-      } catch (e) {
-        debugPrint('[syncHealthData] SpO2 sync note: $e');
-      }
+        // ---------------------------------------------------------------------
+        // C. Activity: Active Minutes & Sedentary (RollUp)
+        // ---------------------------------------------------------------------
+        () async {
+          try {
+            final activeMinutesManager =
+                GoogleHealthActiveMinutesDataManager(credentials: creds);
+            final activeResult = await activeMinutesManager.fetch(
+              GoogleHealthActiveMinutesAPIURL.dateRange(
+                startDate: startDate,
+                endDate: endDate,
+              ),
+            );
 
-      try {
-        final brManager =
-            GoogleHealthBreathingRateDataManager(credentials: credentials);
-        final brResult = await brManager.fetch(
-          GoogleHealthBreathingRateAPIURL.dateRange(
-            startDate: startDate,
-            endDate: endDate,
-          ),
-        );
-        for (final item in brResult.data) {
-          if (item.date.isEmpty) continue;
-          if (isDateFinalized(item.date)) continue;
-          final existing = getBucket(item.date);
-          dailyBuckets[item.date] =
-              existing.copyWith(breathingRate: item.breathsPerMinute);
-        }
-      } catch (e) {
-        debugPrint('[syncHealthData] Breathing rate sync note: $e');
-      }
+            final Map<String, int> dailyActiveSum = {};
+            final Map<String, int> dailyActiveCalSum = {};
 
-      try {
-        final stManager =
-            GoogleHealthSkinTemperatureDataManager(credentials: credentials);
-        final stResult = await stManager.fetch(
-          GoogleHealthSkinTemperatureAPIURL.dateRange(
-            startDate: startDate,
-            endDate: endDate,
-          ),
-        );
-        for (final item in stResult.data) {
-          if (item.date.isEmpty) continue;
-          if (isDateFinalized(item.date)) continue;
-          final existing = getBucket(item.date);
-          dailyBuckets[item.date] =
-              existing.copyWith(skinTempDeviation: item.deviationCelsius);
-        }
-      } catch (e) {
-        debugPrint('[syncHealthData] Skin temp sync note: $e');
-      }
+            for (final item in activeResult.data) {
+              if (item.date.isEmpty) continue;
+              if (isDateFinalized(item.date)) continue;
+              dailyActiveSum[item.date] =
+                  (dailyActiveSum[item.date] ?? 0) + item.activeMinutesSum;
+              if (item.activeCaloriesSum != null &&
+                  item.activeCaloriesSum! > 0) {
+                dailyActiveCalSum[item.date] =
+                    (dailyActiveCalSum[item.date] ?? 0) +
+                        item.activeCaloriesSum!;
+              }
+            }
+
+            for (final entry in dailyActiveSum.entries) {
+              final date = entry.key;
+              if (isDateFinalized(date)) continue;
+              final activeMin = entry.value;
+              updateBucket(date, (cur) {
+                final stepCount = cur.steps ?? 0;
+                final estActiveCal = dailyActiveCalSum[date] ??
+                    ((stepCount * 0.04).round() + (activeMin * 4));
+                final estTotalCal = 1400 + estActiveCal;
+                return cur.copyWith(
+                  activeMinutes: activeMin,
+                  activeCalories: estActiveCal > 0 ? estActiveCal : null,
+                  calories: estTotalCal,
+                );
+              });
+            }
+
+            final sedentaryManager =
+                GoogleHealthSedentaryPeriodDataManager(credentials: creds);
+            final sedentaryResult = await sedentaryManager.fetch(
+              GoogleHealthSedentaryPeriodAPIURL.dateRange(
+                startDate: startDate,
+                endDate: endDate,
+              ),
+            );
+
+            final Map<String, int> dailySedentarySum = {};
+            for (final item in sedentaryResult.data) {
+              if (item.date.isEmpty) continue;
+              if (isDateFinalized(item.date)) continue;
+              dailySedentarySum[item.date] =
+                  (dailySedentarySum[item.date] ?? 0) +
+                      item.sedentaryMinutesSum;
+            }
+
+            for (final entry in dailySedentarySum.entries) {
+              final date = entry.key;
+              if (isDateFinalized(date)) continue;
+              final sedentaryMin = entry.value;
+              updateBucket(
+                date,
+                (cur) => cur.copyWith(sedentaryMinutes: sedentaryMin),
+              );
+            }
+          } catch (e) {
+            debugPrint('[syncHealthData] Active minutes warning: $e');
+          }
+        }(),
+
+        // ---------------------------------------------------------------------
+        // D. Cardiovascular: Resting Heart Rate & HRV
+        // ---------------------------------------------------------------------
+        () async {
+          try {
+            final rhrManager =
+                GoogleHealthRestingHeartRateDataManager(credentials: creds);
+            final rhrResult = await rhrManager.fetch(
+              GoogleHealthRestingHeartRateAPIURL.dateRange(
+                startDate: startDate,
+                endDate: endDate,
+              ),
+            );
+
+            final hrValuesPerDate = <String, List<int>>{};
+            for (final item in rhrResult.data) {
+              if (item.date.isEmpty || item.bpm <= 0) continue;
+              if (isDateFinalized(item.date)) continue;
+              hrValuesPerDate.putIfAbsent(item.date, () => []).add(item.bpm);
+            }
+            for (final entry in hrValuesPerDate.entries) {
+              final date = entry.key;
+              if (isDateFinalized(date)) continue;
+              final list = entry.value;
+              final avgBpm = list.reduce((a, b) => a + b) ~/ list.length;
+              updateBucket(date, (cur) {
+                final currentRhr = cur.restingHeartRate;
+                return cur.copyWith(
+                  restingHeartRate: (currentRhr != null && currentRhr > 0)
+                      ? currentRhr
+                      : avgBpm,
+                );
+              });
+            }
+
+            final hrvManager =
+                GoogleHealthHrvDataManager(credentials: creds);
+            final hrvResult = await hrvManager.fetch(
+              GoogleHealthHrvAPIURL.dateRange(
+                startDate: startDate,
+                endDate: endDate,
+              ),
+            );
+
+            for (final item in hrvResult.data) {
+              if (item.date.isEmpty) continue;
+              if (isDateFinalized(item.date)) continue;
+              updateBucket(item.date, (cur) => cur.copyWith(avgHrv: item.rmssd));
+            }
+          } catch (e) {
+            debugPrint('[syncHealthData] Heart rate sync warning: $e');
+          }
+        }(),
+
+        // ---------------------------------------------------------------------
+        // E. Sleep: Sessions & Stages
+        // ---------------------------------------------------------------------
+        () async {
+          try {
+            final sleepManager =
+                GoogleHealthSleepDataManager(credentials: creds);
+            final sleepResult = await sleepManager.fetch(
+              GoogleHealthSleepAPIURL.dateRange(
+                startDate: startDate,
+                endDate: endDate,
+              ),
+            );
+
+            for (final session in sleepResult.data) {
+              if (session.date.isEmpty) continue;
+              if (isDateFinalized(session.date)) continue;
+              updateBucket(
+                session.date,
+                (cur) => cur.copyWith(
+                  sleepMinutes: session.durationMinutes,
+                  sleepScore: session.sleepScore ?? cur.sleepScore,
+                ),
+              );
+
+              // Save individual sleep session record if not already stored
+              if (!existingSleeps.containsKey(session.date)) {
+                final sleepRecord = SleepRecord(
+                  date: session.date,
+                  startTime: session.startTime,
+                  endTime: session.endTime,
+                  durationMinutes: session.durationMinutes,
+                  awakeMinutes: session.awakeMinutes,
+                  lightMinutes: session.lightMinutes,
+                  deepMinutes: session.deepMinutes,
+                  remMinutes: session.remMinutes,
+                  sleepScore: session.sleepScore,
+                  source: session.source ?? 'google_wearables',
+                  updatedAt: now,
+                );
+                await _healthRepository.saveSleepRecord(sleepRecord);
+              }
+            }
+          } catch (e) {
+            debugPrint('[syncHealthData] Sleep sync warning: $e');
+          }
+        }(),
+
+        // ---------------------------------------------------------------------
+        // F. Health Metrics: SpO2, Breathing Rate, Skin Temperature
+        // ---------------------------------------------------------------------
+        () async {
+          try {
+            final spo2Manager =
+                GoogleHealthOxygenSaturationDataManager(credentials: creds);
+            final spo2Result = await spo2Manager.fetch(
+              GoogleHealthOxygenSaturationAPIURL.dateRange(
+                startDate: startDate,
+                endDate: endDate,
+              ),
+            );
+            for (final item in spo2Result.data) {
+              if (item.date.isEmpty) continue;
+              if (isDateFinalized(item.date)) continue;
+              updateBucket(
+                item.date,
+                (cur) => cur.copyWith(avgSpo2: item.percentage),
+              );
+            }
+          } catch (e) {
+            debugPrint('[syncHealthData] SpO2 sync note: $e');
+          }
+
+          try {
+            final brManager =
+                GoogleHealthBreathingRateDataManager(credentials: creds);
+            final brResult = await brManager.fetch(
+              GoogleHealthBreathingRateAPIURL.dateRange(
+                startDate: startDate,
+                endDate: endDate,
+              ),
+            );
+            for (final item in brResult.data) {
+              if (item.date.isEmpty) continue;
+              if (isDateFinalized(item.date)) continue;
+              updateBucket(
+                item.date,
+                (cur) => cur.copyWith(breathingRate: item.breathsPerMinute),
+              );
+            }
+          } catch (e) {
+            debugPrint('[syncHealthData] Breathing rate sync note: $e');
+          }
+
+          try {
+            final stManager =
+                GoogleHealthSkinTemperatureDataManager(credentials: creds);
+            final stResult = await stManager.fetch(
+              GoogleHealthSkinTemperatureAPIURL.dateRange(
+                startDate: startDate,
+                endDate: endDate,
+              ),
+            );
+            for (final item in stResult.data) {
+              if (item.date.isEmpty) continue;
+              if (isDateFinalized(item.date)) continue;
+              updateBucket(
+                item.date,
+                (cur) =>
+                    cur.copyWith(skinTempDeviation: item.deviationCelsius),
+              );
+            }
+          } catch (e) {
+            debugPrint('[syncHealthData] Skin temp sync note: $e');
+          }
+        }(),
+      ]);
 
       // -----------------------------------------------------------------------
       // F. Batch persist only new or modified daily summaries to Firestore

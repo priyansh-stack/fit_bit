@@ -252,68 +252,88 @@ class GoogleHealthConnector {
     return credentials;
   }
 
+  static Completer<GoogleHealthCredentials>? _refreshCompleter;
+
   /// Refreshes token if expiring within 60s.
+  /// Uses single-flight mutex so concurrent calls share the same refresh request.
   Future<GoogleHealthCredentials> refreshTokenIfNeeded(
     GoogleHealthCredentials creds, {
     required String clientId,
     required String clientSecret,
   }) async {
     if (!creds.isExpiredOrExpiring) return creds;
-    if (creds.refreshToken == null) {
-      throw const TokenRevokedException(
-        message: 'No refresh token available. Please reconnect Google Health.',
-      );
+
+    if (_refreshCompleter != null) {
+      return _refreshCompleter!.future;
     }
 
-    final effectiveSecret = clientSecret.isNotEmpty
-        ? clientSecret
-        : await OAuthConstants.resolveClientSecret();
+    final completer = Completer<GoogleHealthCredentials>();
+    _refreshCompleter = completer;
 
-    final response = await _client.post(
-      Uri.parse(OAuthConstants.tokenEndpoint),
-      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-      body: {
-        'client_id': clientId,
-        'client_secret': effectiveSecret,
-        'refresh_token': creds.refreshToken!,
-        'grant_type': 'refresh_token',
-      },
-    ).timeout(const Duration(seconds: 30));
-
-    if (response.statusCode == 400 || response.statusCode == 401) {
-      final body = response.body;
-      debugPrint('[GoogleHealthConnector] Token refresh rejected HTTP ${response.statusCode}: $body');
-      if (body.contains('invalid_grant')) {
-        await GoogleHealthSession.logout();
+    try {
+      if (creds.refreshToken == null) {
         throw const TokenRevokedException(
-          message: 'Authorization expired or revoked. Please reconnect.',
+          message: 'No refresh token available. Please reconnect Google Health.',
         );
       }
-      throw HealthConnectionException(
-        message: 'Token refresh failed (${response.statusCode}): $body',
+
+      final effectiveSecret = clientSecret.isNotEmpty
+          ? clientSecret
+          : await OAuthConstants.resolveClientSecret();
+
+      final response = await _client.post(
+        Uri.parse(OAuthConstants.tokenEndpoint),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {
+          'client_id': clientId,
+          'client_secret': effectiveSecret,
+          'refresh_token': creds.refreshToken!,
+          'grant_type': 'refresh_token',
+        },
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 400 || response.statusCode == 401) {
+        final body = response.body;
+        debugPrint(
+            '[GoogleHealthConnector] Token refresh rejected HTTP ${response.statusCode}: $body');
+        if (body.contains('invalid_grant')) {
+          await GoogleHealthSession.logout();
+          throw const TokenRevokedException(
+            message: 'Authorization expired or revoked. Please reconnect.',
+          );
+        }
+        throw HealthConnectionException(
+          message: 'Token refresh failed (${response.statusCode}): $body',
+        );
+      }
+
+      if (response.statusCode != 200) {
+        throw SyncException(
+          message: 'Token refresh failed with HTTP ${response.statusCode}',
+        );
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final newAccessToken = data['access_token'] as String;
+      final expiresIn = data['expires_in'] as int? ?? 3600;
+
+      final updated = GoogleHealthCredentials(
+        accessToken: newAccessToken,
+        refreshToken: creds.refreshToken,
+        tokenExpiry: DateTime.now().add(Duration(seconds: expiresIn)),
+        grantedScopes: creds.grantedScopes,
+        userId: creds.userId,
       );
+
+      await GoogleHealthSession.saveCredentials(updated);
+      completer.complete(updated);
+      return updated;
+    } catch (e, st) {
+      completer.completeError(e, st);
+      rethrow;
+    } finally {
+      _refreshCompleter = null;
     }
-
-    if (response.statusCode != 200) {
-      throw SyncException(
-        message: 'Token refresh failed with HTTP ${response.statusCode}',
-      );
-    }
-
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    final newAccessToken = data['access_token'] as String;
-    final expiresIn = data['expires_in'] as int? ?? 3600;
-
-    final updated = GoogleHealthCredentials(
-      accessToken: newAccessToken,
-      refreshToken: creds.refreshToken,
-      tokenExpiry: DateTime.now().add(Duration(seconds: expiresIn)),
-      grantedScopes: creds.grantedScopes,
-      userId: creds.userId,
-    );
-
-    await GoogleHealthSession.saveCredentials(updated);
-    return updated;
   }
 
   /// Revokes credentials and logs out.
@@ -368,7 +388,7 @@ abstract class BaseGoogleHealthDataManager<T> {
 
   @protected
   Future<List<Map<String, dynamic>>> fetchAllPages(
-      GoogleHealthAPIURL url) async {
+      GoogleHealthAPIURL url, {int maxPages = 2}) async {
     final allItems = <Map<String, dynamic>>[];
     final seenTokens = <String>{};
     String? nextPageToken;
@@ -387,9 +407,11 @@ abstract class BaseGoogleHealthDataManager<T> {
             requestBody: updatedBody,
           );
         } else {
-          final sep = url.url.contains('?') ? '&' : '?';
+          final parsed = Uri.parse(url.url);
+          final updatedParams = Map<String, String>.from(parsed.queryParameters);
+          updatedParams['pageToken'] = nextPageToken;
           pageUrl = GoogleHealthAPIURL(
-            url: '${url.url}${sep}pageToken=$nextPageToken',
+            url: parsed.replace(queryParameters: updatedParams).toString(),
             isRollUp: false,
           );
         }
@@ -416,7 +438,7 @@ abstract class BaseGoogleHealthDataManager<T> {
         break; // PREVENT DUPLICATE PAGE TOKEN LOOP
       }
     } while (
-        nextPageToken != null && nextPageToken.isNotEmpty && pageCount < 15);
+        nextPageToken != null && nextPageToken.isNotEmpty && pageCount < maxPages);
 
     return allItems;
   }
@@ -477,7 +499,10 @@ abstract class BaseGoogleHealthDataManager<T> {
     }
 
     debugPrint(
-        '[GoogleHealth] HTTP ${response.statusCode} on ${url.url}\nPayload: ${jsonEncode(url.requestBody)}\nResponse: ${response.body}');
+        '[GoogleHealth] HTTP ${response.statusCode} on ${url.url} (${response.body.length} bytes)');
+    if (response.statusCode >= 400) {
+      debugPrint('[GoogleHealth] ⚠️ Response: ${response.body}');
+    }
 
     if (response.statusCode == 401 && credentials.refreshToken != null) {
       try {
@@ -525,7 +550,7 @@ abstract class BaseGoogleHealthDataManager<T> {
     }
     if (response.statusCode != 200) {
       debugPrint(
-          '[GoogleHealth] ERROR ${response.statusCode} on ${url.url}\nPayload: ${jsonEncode(url.requestBody)}\nResponse: ${response.body}');
+          '[GoogleHealth] ERROR ${response.statusCode} on ${url.url} (${response.body.length} bytes)');
       throw GoogleHealthApiException(
         message:
             'Google Health API request failed: HTTP ${response.statusCode} - ${response.body}',
@@ -534,7 +559,7 @@ abstract class BaseGoogleHealthDataManager<T> {
     }
 
     debugPrint(
-        '[GoogleHealth] 🟢 SUCCESS 200 on ${url.url} (Body: ${response.body})');
+        '[GoogleHealth] 🟢 SUCCESS 200 on ${url.url} (${response.body.length} bytes)');
     return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
   }
 }
@@ -647,11 +672,9 @@ class GoogleHealthAPIURL {
         },
       );
     } else {
-      final uri = Uri.parse(
-        '${GoogleHealthApiConstants.baseUrl}/dataTypes/$dataType${GoogleHealthApiConstants.dataPointsSuffix}',
-      );
-
-      return GoogleHealthAPIURL(url: uri.toString(), isRollUp: false);
+      final url =
+          '${GoogleHealthApiConstants.baseUrl}/dataTypes/$dataType${GoogleHealthApiConstants.dataPointsSuffix}';
+      return GoogleHealthAPIURL(url: url, isRollUp: false);
     }
   }
 }
