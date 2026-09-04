@@ -60,7 +60,7 @@ class DashboardScreen extends StatelessWidget {
           onRefresh: () async {
             await context
                 .read<HealthConnectionCubit>()
-                .syncHealthData(fullHistory: true);
+                .syncHealthData();
             if (context.mounted) {
               context.read<DashboardCubit>().refresh();
             }
@@ -105,7 +105,7 @@ class DashboardScreen extends StatelessWidget {
                       try {
                         await context
                             .read<HealthConnectionCubit>()
-                            .syncHealthData(fullHistory: true);
+                            .syncHealthData();
                         if (context.mounted) {
                           context.read<DashboardCubit>().refresh();
                           ScaffoldMessenger.of(context).showSnackBar(

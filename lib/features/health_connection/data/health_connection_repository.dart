@@ -264,25 +264,117 @@ class HealthConnectionRepository {
       status: 'running',
     );
 
-    final daysToFetch = fullHistory
-        ? AppConstants.initialSyncDays
-        : AppConstants.dashboardChartDays;
     final now = DateTime.now();
-    final startDate = now.subtract(Duration(days: daysToFetch - 1));
-    final endDate = now;
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    final yesterdayDate = now.subtract(const Duration(days: 1));
+    final yesterdayStr = DateFormat('yyyy-MM-dd').format(yesterdayDate);
+    final todayMidnight = DateTime(now.year, now.month, now.day);
+
+    // 1. Retrieve existing Firestore summaries so we can perform incremental sync
+    // and avoid re-fetching or modifying finalized past data.
+    final existingDailies = await _healthRepository.getRecentDailySummaries(
+      days: fullHistory
+          ? AppConstants.initialSyncDays
+          : AppConstants.dashboardChartDays * 2,
+    );
+    final existingSleeps = await _healthRepository.getRecentSleepRecords(
+      limit: fullHistory ? AppConstants.initialSyncDays : 14,
+    );
+
+    // 2. Compute the exact incremental date range to query from the APIs.
+    DateTime startDate;
+    final DateTime endDate = now;
+
+    if (fullHistory) {
+      startDate =
+          now.subtract(const Duration(days: AppConstants.initialSyncDays - 1));
+    } else {
+      // Find the earliest missing or unfinalized date in recent history
+      DateTime candidate = now;
+      for (int i = 1; i < AppConstants.dashboardChartDays; i++) {
+        final d = now.subtract(Duration(days: i));
+        final dStr = DateFormat('yyyy-MM-dd').format(d);
+        final existing = existingDailies[dStr];
+        final isPastFinalized = existing != null &&
+            (dStr.compareTo(yesterdayStr) < 0 ||
+                (existing.updatedAt != null &&
+                    existing.updatedAt!.isAfter(todayMidnight)) ||
+                ((existing.steps ?? 0) > 0 &&
+                    existing.sleepMinutes != null &&
+                    existing.sleepMinutes! > 0));
+
+        if (!isPastFinalized) {
+          candidate = d;
+        }
+      }
+      startDate = DateTime(candidate.year, candidate.month, candidate.day);
+    }
+
+    final startStr = DateFormat('yyyy-MM-dd').format(startDate);
+
+    // Determines whether a past date's data is already complete and finalized in Firestore.
+    // Finalized data is NEVER re-queried from external APIs and NEVER re-written to Firestore.
+    bool isDateFinalized(String dateStr) {
+      if (dateStr.isEmpty || dateStr == todayStr) {
+        return false; // Today is active and constantly accumulating metrics
+      }
+
+      // If date is before our sync window, ignore it (never write older outliers)
+      if (!fullHistory && dateStr.compareTo(startStr) < 0) {
+        return true;
+      }
+
+      final existing = existingDailies[dateStr];
+      if (existing == null) {
+        return false; // Not in Firestore yet -> needs to be fetched
+      }
+
+      // If date is 2 or more days ago (older than yesterday):
+      // Once stored in Firestore, historical days are 100% complete and finalized.
+      if (dateStr.compareTo(yesterdayStr) < 0) {
+        return true;
+      }
+
+      // If date is yesterday:
+      // Yesterday is finalized once it has been synced today (after midnight),
+      // or if it already has both sleep and step metrics stored.
+      if (existing.updatedAt != null &&
+          existing.updatedAt!.isAfter(todayMidnight)) {
+        return true;
+      }
+      if ((existing.steps ?? 0) > 0 &&
+          existing.sleepMinutes != null &&
+          existing.sleepMinutes! > 0) {
+        return true;
+      }
+
+      return false;
+    }
+
+    debugPrint(
+        '[syncHealthData] 🚀 Incremental sync window: $startDate to $endDate (fullHistory: $fullHistory)');
 
     int totalRecordsWritten = 0;
     final Map<String, HealthDaily> dailyBuckets = {};
 
-    // Helper to get or create daily bucket
+    // Helper to get or create daily bucket for unfinalized dates
     HealthDaily getBucket(String date) {
       return dailyBuckets.putIfAbsent(
         date,
-        () => HealthDaily(
-          date: date,
-          source: 'google_fitness',
-          updatedAt: DateTime.now(),
-        ),
+        () {
+          final existing = existingDailies[date];
+          if (existing != null) {
+            // Seed from existing document to preserve all non-overlapping fields
+            return existing.copyWith(
+              updatedAt: date == todayStr ? now : existing.updatedAt,
+            );
+          }
+          return HealthDaily(
+            date: date,
+            source: 'google_health',
+            updatedAt: now,
+          );
+        },
       );
     }
 
@@ -304,6 +396,7 @@ class HealthConnectionRepository {
 
           for (final item in fitnessDailies) {
             if (item.date.isEmpty) continue;
+            if (isDateFinalized(item.date)) continue;
             dailyBuckets[item.date] = item;
           }
 
@@ -314,7 +407,10 @@ class HealthConnectionRepository {
           );
 
           for (final sleep in sleepSessions) {
-            await _healthRepository.saveSleepRecord(sleep);
+            if (isDateFinalized(sleep.date)) continue;
+            if (!existingSleeps.containsKey(sleep.date)) {
+              await _healthRepository.saveSleepRecord(sleep);
+            }
             final existing = getBucket(sleep.date);
             dailyBuckets[sleep.date] = existing.copyWith(
               sleepMinutes:
@@ -347,6 +443,7 @@ class HealthConnectionRepository {
 
         for (final item in stepsResult.data) {
           if (item.date.isEmpty) continue;
+          if (isDateFinalized(item.date)) continue;
           dailyStepsSum[item.date] =
               (dailyStepsSum[item.date] ?? 0) + item.countSum;
           if (item.distanceMetersSum != null && item.distanceMetersSum! > 0) {
@@ -364,6 +461,7 @@ class HealthConnectionRepository {
 
         for (final entry in dailyStepsSum.entries) {
           final date = entry.key;
+          if (isDateFinalized(date)) continue;
           final stepCount = entry.value;
           final existing = getBucket(date);
           final estDistance =
@@ -381,12 +479,6 @@ class HealthConnectionRepository {
             calories: estCalories,
             source: 'google_health',
           );
-        }
-
-        // Progressive save: push steps immediately to Firestore so UI updates in real-time
-        if (dailyBuckets.isNotEmpty) {
-          await _healthRepository
-              .batchSaveDailySummaries(dailyBuckets.values.toList());
         }
       } catch (e) {
         debugPrint('[syncHealthData] Steps sync warning: $e');
@@ -410,6 +502,7 @@ class HealthConnectionRepository {
 
         for (final item in activeResult.data) {
           if (item.date.isEmpty) continue;
+          if (isDateFinalized(item.date)) continue;
           dailyActiveSum[item.date] =
               (dailyActiveSum[item.date] ?? 0) + item.activeMinutesSum;
           if (item.activeCaloriesSum != null && item.activeCaloriesSum! > 0) {
@@ -420,6 +513,7 @@ class HealthConnectionRepository {
 
         for (final entry in dailyActiveSum.entries) {
           final date = entry.key;
+          if (isDateFinalized(date)) continue;
           final activeMin = entry.value;
           final existing = getBucket(date);
           final stepCount = existing.steps ?? 0;
@@ -448,23 +542,19 @@ class HealthConnectionRepository {
         final Map<String, int> dailySedentarySum = {};
         for (final item in sedentaryResult.data) {
           if (item.date.isEmpty) continue;
+          if (isDateFinalized(item.date)) continue;
           dailySedentarySum[item.date] =
               (dailySedentarySum[item.date] ?? 0) + item.sedentaryMinutesSum;
         }
 
         for (final entry in dailySedentarySum.entries) {
           final date = entry.key;
+          if (isDateFinalized(date)) continue;
           final sedentaryMin = entry.value;
           final existing = getBucket(date);
           dailyBuckets[date] = existing.copyWith(
             sedentaryMinutes: sedentaryMin,
           );
-        }
-
-        // Progressive save: active minutes & sedentary
-        if (dailyBuckets.isNotEmpty) {
-          await _healthRepository
-              .batchSaveDailySummaries(dailyBuckets.values.toList());
         }
       } catch (e) {
         debugPrint('[syncHealthData] Active minutes warning: $e');
@@ -486,10 +576,12 @@ class HealthConnectionRepository {
         final hrValuesPerDate = <String, List<int>>{};
         for (final item in rhrResult.data) {
           if (item.date.isEmpty || item.bpm <= 0) continue;
+          if (isDateFinalized(item.date)) continue;
           hrValuesPerDate.putIfAbsent(item.date, () => []).add(item.bpm);
         }
         for (final entry in hrValuesPerDate.entries) {
           final date = entry.key;
+          if (isDateFinalized(date)) continue;
           final list = entry.value;
           final avgBpm = list.reduce((a, b) => a + b) ~/ list.length;
           final existing = getBucket(date);
@@ -510,16 +602,11 @@ class HealthConnectionRepository {
 
         for (final item in hrvResult.data) {
           if (item.date.isEmpty) continue;
+          if (isDateFinalized(item.date)) continue;
           final existing = getBucket(item.date);
           dailyBuckets[item.date] = existing.copyWith(
             avgHrv: item.rmssd,
           );
-        }
-
-        // Progressive save: heart rate & HRV
-        if (dailyBuckets.isNotEmpty) {
-          await _healthRepository
-              .batchSaveDailySummaries(dailyBuckets.values.toList());
         }
       } catch (e) {
         debugPrint('[syncHealthData] Heart rate sync warning: $e');
@@ -540,33 +627,30 @@ class HealthConnectionRepository {
 
         for (final session in sleepResult.data) {
           if (session.date.isEmpty) continue;
+          if (isDateFinalized(session.date)) continue;
           final existing = getBucket(session.date);
           dailyBuckets[session.date] = existing.copyWith(
             sleepMinutes: session.durationMinutes,
             sleepScore: session.sleepScore ?? existing.sleepScore,
           );
 
-          // Save individual sleep session record
-          final sleepRecord = SleepRecord(
-            date: session.date,
-            startTime: session.startTime,
-            endTime: session.endTime,
-            durationMinutes: session.durationMinutes,
-            awakeMinutes: session.awakeMinutes,
-            lightMinutes: session.lightMinutes,
-            deepMinutes: session.deepMinutes,
-            remMinutes: session.remMinutes,
-            sleepScore: session.sleepScore,
-            source: session.source ?? 'google_wearables',
-            updatedAt: DateTime.now(),
-          );
-          await _healthRepository.saveSleepRecord(sleepRecord);
-        }
-
-        // Progressive save: sleep
-        if (dailyBuckets.isNotEmpty) {
-          await _healthRepository
-              .batchSaveDailySummaries(dailyBuckets.values.toList());
+          // Save individual sleep session record if not already stored
+          if (!existingSleeps.containsKey(session.date)) {
+            final sleepRecord = SleepRecord(
+              date: session.date,
+              startTime: session.startTime,
+              endTime: session.endTime,
+              durationMinutes: session.durationMinutes,
+              awakeMinutes: session.awakeMinutes,
+              lightMinutes: session.lightMinutes,
+              deepMinutes: session.deepMinutes,
+              remMinutes: session.remMinutes,
+              sleepScore: session.sleepScore,
+              source: session.source ?? 'google_wearables',
+              updatedAt: now,
+            );
+            await _healthRepository.saveSleepRecord(sleepRecord);
+          }
         }
       } catch (e) {
         debugPrint('[syncHealthData] Sleep sync warning: $e');
@@ -586,6 +670,7 @@ class HealthConnectionRepository {
         );
         for (final item in spo2Result.data) {
           if (item.date.isEmpty) continue;
+          if (isDateFinalized(item.date)) continue;
           final existing = getBucket(item.date);
           dailyBuckets[item.date] = existing.copyWith(avgSpo2: item.percentage);
         }
@@ -604,6 +689,7 @@ class HealthConnectionRepository {
         );
         for (final item in brResult.data) {
           if (item.date.isEmpty) continue;
+          if (isDateFinalized(item.date)) continue;
           final existing = getBucket(item.date);
           dailyBuckets[item.date] =
               existing.copyWith(breathingRate: item.breathsPerMinute);
@@ -623,6 +709,7 @@ class HealthConnectionRepository {
         );
         for (final item in stResult.data) {
           if (item.date.isEmpty) continue;
+          if (isDateFinalized(item.date)) continue;
           final existing = getBucket(item.date);
           dailyBuckets[item.date] =
               existing.copyWith(skinTempDeviation: item.deviationCelsius);
@@ -632,14 +719,46 @@ class HealthConnectionRepository {
       }
 
       // -----------------------------------------------------------------------
-      // F. Batch persist normalized daily summaries to Firestore
+      // F. Batch persist only new or modified daily summaries to Firestore
       // -----------------------------------------------------------------------
-      if (dailyBuckets.isNotEmpty) {
+      final List<HealthDaily> summariesToPersist = [];
+
+      for (final summary in dailyBuckets.values) {
+        if (summary.date.isEmpty) continue;
+        if (isDateFinalized(summary.date)) continue;
+
+        final existing = existingDailies[summary.date];
+        if (existing != null && summary.date != todayStr) {
+          // Compare past day metrics: if unchanged, do NOT touch document or updatedAt
+          final hasChanged = existing.steps != summary.steps ||
+              existing.distanceMeters != summary.distanceMeters ||
+              existing.calories != summary.calories ||
+              existing.activeMinutes != summary.activeMinutes ||
+              existing.restingHeartRate != summary.restingHeartRate ||
+              existing.sleepMinutes != summary.sleepMinutes ||
+              existing.avgSpo2 != summary.avgSpo2 ||
+              existing.avgHrv != summary.avgHrv;
+
+          if (!hasChanged) {
+            debugPrint(
+                '[syncHealthData] Date ${summary.date} is unchanged. Skipping Firestore write.');
+            continue;
+          }
+        }
+
+        // Today or newly finalized past date with real changes gets updatedAt = now
+        summariesToPersist.add(summary.copyWith(updatedAt: now));
+      }
+
+      if (summariesToPersist.isNotEmpty) {
         debugPrint(
-            '[syncHealthData] 💾 Persisting ${dailyBuckets.length} summaries to Firestore: ${dailyBuckets.entries.map((e) => "${e.key}: ${e.value.steps} steps").toList()}');
-        await _healthRepository
-            .batchSaveDailySummaries(dailyBuckets.values.toList());
-        totalRecordsWritten += dailyBuckets.length;
+            '[syncHealthData] 💾 Persisting ${summariesToPersist.length} modified/new summaries to Firestore: '
+            '${summariesToPersist.map((e) => "${e.date}: ${e.steps} steps").toList()}');
+        await _healthRepository.batchSaveDailySummaries(summariesToPersist);
+        totalRecordsWritten += summariesToPersist.length;
+      } else {
+        debugPrint(
+            '[syncHealthData] 💾 No daily summaries needed Firestore update.');
       }
 
       // -----------------------------------------------------------------------

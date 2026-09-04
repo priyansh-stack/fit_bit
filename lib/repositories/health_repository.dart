@@ -77,6 +77,32 @@ class HealthRepository {
         .set(summary.toJson(), SetOptions(merge: true));
   }
 
+  /// Retrieves recent daily summaries from Firestore mapped by date (yyyy-MM-dd).
+  Future<Map<String, HealthDaily>> getRecentDailySummaries({int days = 35}) async {
+    final uid = _uid;
+    if (uid == null) return {};
+    try {
+      final snap = await _firestore
+          .collection(FirestorePaths.users)
+          .doc(uid)
+          .collection(FirestorePaths.healthDaily)
+          .orderBy('date', descending: true)
+          .limit(days)
+          .get();
+
+      final result = <String, HealthDaily>{};
+      for (final doc in snap.docs) {
+        final summary = HealthDaily.fromFirestore(doc);
+        if (summary.date.isNotEmpty) {
+          result[summary.date] = summary;
+        }
+      }
+      return result;
+    } catch (_) {
+      return {};
+    }
+  }
+
   /// Batch write daily summaries
   Future<void> batchSaveDailySummaries(List<HealthDaily> summaries) async {
     final uid = _uid;
@@ -143,6 +169,31 @@ class HealthRepository {
         return snap.docs.map(SleepRecord.fromFirestore).toList();
       });
     });
+  }
+
+  /// Retrieves recent sleep records from Firestore mapped by date (yyyy-MM-dd).
+  Future<Map<String, SleepRecord>> getRecentSleepRecords({int limit = 14}) async {
+    final uid = _uid;
+    if (uid == null) return {};
+    try {
+      final snap = await _firestore
+          .collection(FirestorePaths.users)
+          .doc(uid)
+          .collection(FirestorePaths.sleep)
+          .orderBy('date', descending: true)
+          .limit(limit)
+          .get();
+      final result = <String, SleepRecord>{};
+      for (final doc in snap.docs) {
+        final record = SleepRecord.fromFirestore(doc);
+        if (record.date.isNotEmpty) {
+          result[record.date] = record;
+        }
+      }
+      return result;
+    } catch (_) {
+      return {};
+    }
   }
 
   Future<void> saveSleepRecord(SleepRecord record) async {

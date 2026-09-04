@@ -23,7 +23,7 @@ class SleepScreen extends StatelessWidget {
         onRefresh: () async {
           await context
               .read<HealthConnectionCubit>()
-              .syncHealthData(fullHistory: true);
+              .syncHealthData();
           if (context.mounted) {
             context.read<SleepCubit>().refresh();
           }
