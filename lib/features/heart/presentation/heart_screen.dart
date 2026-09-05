@@ -78,6 +78,11 @@ class _HeartContent extends StatelessWidget {
             validRHR.length
         : null;
 
+    final latestRHR = days.reversed
+        .where((d) => d.restingHeartRate != null && d.restingHeartRate! > 0)
+        .map((d) => d.restingHeartRate!)
+        .firstOrNull;
+
     final latestHrv = days.reversed
         .where((d) => d.avgHrv != null && d.avgHrv! > 0)
         .map((d) => d.avgHrv!)
@@ -123,24 +128,55 @@ class _HeartContent extends StatelessWidget {
               const Icon(Icons.favorite_rounded,
                   color: AppTheme.heartColor, size: 36),
               const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    avgRHR != null ? '$avgRHR bpm' : '-- bpm',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700),
-                  ),
-                  Text(
-                    '14-Day Average Resting HR',
-                    style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.6),
-                        fontSize: 13),
-                  ),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      latestRHR != null ? '$latestRHR bpm' : '-- bpm',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w700),
+                    ),
+                    Text(
+                      'Resting Heart Rate',
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.75),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
               ),
+              if (avgRHR != null)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border:
+                        Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '$avgRHR bpm',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700),
+                      ),
+                      Text(
+                        '14-Day Avg',
+                        style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.55),
+                            fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),
@@ -205,22 +241,6 @@ class _HeartContent extends StatelessWidget {
             message: 'No resting heart rate data yet.',
             icon: Icons.favorite_border_rounded,
           ),
-
-        const SizedBox(height: 28),
-
-        Text('Recent Heart Rate Readings',
-            style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 12),
-
-        if (recentHR.isEmpty)
-          const EmptyDataView(
-            message: 'No intraday heart rate readings found.',
-            icon: Icons.monitor_heart_outlined,
-          )
-        else
-          Column(
-            children: recentHR.map((r) => _HRReadingTile(record: r)).toList(),
-          ),
       ],
     );
   }
@@ -275,64 +295,4 @@ class _MetricCard extends StatelessWidget {
       ),
     );
   }
-}
-
-class _HRReadingTile extends StatelessWidget {
-  const _HRReadingTile({required this.record});
-  final HeartRateRecord record;
-
-  @override
-  Widget build(BuildContext context) {
-    final zone = _hrZone(record.bpm);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.favorite_rounded, color: zone.color, size: 18),
-          const SizedBox(width: 12),
-          Text('${record.bpm} bpm',
-              style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.w600)),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-            decoration: BoxDecoration(
-              color: zone.color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(zone.name,
-                style: TextStyle(
-                    color: zone.color,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600)),
-          ),
-          const Spacer(),
-          Text(
-            HealthDateUtils.relativeTime(record.timestamp),
-            style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.4), fontSize: 11),
-          ),
-        ],
-      ),
-    );
-  }
-
-  _HRZone _hrZone(int bpm) {
-    if (bpm < 60) return const _HRZone('Rest', Color(0xFF60A5FA));
-    if (bpm < 100) return const _HRZone('Normal', Color(0xFF10B981));
-    if (bpm < 140) return const _HRZone('Cardio', Color(0xFFF97316));
-    return const _HRZone('Peak', Color(0xFFEF4444));
-  }
-}
-
-class _HRZone {
-  const _HRZone(this.name, this.color);
-  final String name;
-  final Color color;
 }

@@ -315,6 +315,22 @@ class _MetricGrid extends StatelessWidget {
                 ? '${sleepHours.toStringAsFixed(1)}h / ${goals.sleepHoursGoal.toStringAsFixed(1)}h goal'
                 : null));
 
+    // Look at today's resting HR, or fallback to the most recent day with resting HR
+    final effectiveHeartDay =
+        (today?.restingHeartRate != null && today!.restingHeartRate! > 0)
+            ? today
+            : recentDays.reversed
+                .where((d) =>
+                    d.restingHeartRate != null && d.restingHeartRate! > 0)
+                .firstOrNull;
+
+    final isPastHeart =
+        (today?.restingHeartRate == null || today!.restingHeartRate == 0) &&
+            effectiveHeartDay != null;
+
+    final restingHr = effectiveHeartDay?.restingHeartRate;
+    final heartSubtitle = isPastHeart ? 'Last recorded · Resting' : 'Resting';
+
     return GridView.count(
       crossAxisCount: 2,
       shrinkWrap: true,
@@ -379,16 +395,14 @@ class _MetricGrid extends StatelessWidget {
         ),
         HealthCard(
           title: 'Heart Rate',
-          value: today?.restingHeartRate != null && today!.restingHeartRate! > 0
-              ? '${today!.restingHeartRate} bpm'
+          value: restingHr != null && restingHr > 0
+              ? '$restingHr bpm'
               : '--',
-          subtitle: 'Resting',
+          subtitle: heartSubtitle,
           icon: Icons.favorite_rounded,
           color: AppTheme.heartColor,
           isLoading: isLoading,
-          isEmpty: (today?.restingHeartRate == null ||
-                  today!.restingHeartRate == 0) &&
-              !isLoading,
+          isEmpty: (restingHr == null || restingHr == 0) && !isLoading,
           onTap: () => context.go(AppRoute.heart),
         ),
         HealthCard(
