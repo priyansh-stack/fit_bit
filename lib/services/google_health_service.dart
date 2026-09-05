@@ -1292,7 +1292,6 @@ class GoogleHealthSleepData {
   final String? source;
 
   factory GoogleHealthSleepData.fromJson(Map<String, dynamic> json) {
-    final date = _extractDate(json);
     final val = _extractPayload(json);
 
     final interval = val['interval'] is Map ? val['interval'] as Map : null;
@@ -1301,20 +1300,149 @@ class GoogleHealthSleepData {
 
     final start = DateTime.tryParse(startStr ?? '') ?? DateTime.now();
     final end = DateTime.tryParse(endStr ?? '') ?? DateTime.now();
-    final duration = (json['durationMinutes'] as num?)?.toInt() ??
+    final totalIntervalMin = (json['durationMinutes'] as num?)?.toInt() ??
+        (val['durationMinutes'] as num?)?.toInt() ??
+        (val['duration'] as num?)?.toInt() ??
         end.difference(start).inMinutes;
 
+    int? parseMinutes(dynamic v) {
+      if (v == null) return null;
+      if (v is num) {
+        if (v > 100000) return (v / 60000).round();
+        if (v > 1440) return (v / 60).round();
+        return v.toInt();
+      }
+      if (v is String) {
+        if (v.endsWith('s')) {
+          final sec = double.tryParse(v.substring(0, v.length - 1));
+          if (sec != null) return (sec / 60).round();
+        }
+        if (v.endsWith('m')) {
+          final m = int.tryParse(v.substring(0, v.length - 1));
+          if (m != null) return m;
+        }
+        final n = num.tryParse(v);
+        if (n != null) return parseMinutes(n);
+      }
+      if (v is Map) {
+        final sec = v['seconds'] ?? v['totalSeconds'];
+        if (sec != null) return parseMinutes(sec);
+      }
+      return null;
+    }
+
+    int? awakeMin = parseMinutes(val['awakeMinutes'] ?? val['awake'] ?? json['awakeMinutes']);
+    int? lightMin = parseMinutes(val['lightMinutes'] ?? val['light'] ?? json['lightMinutes']);
+    int? deepMin = parseMinutes(val['deepMinutes'] ?? val['deep'] ?? json['deepMinutes']);
+    int? remMin = parseMinutes(val['remMinutes'] ?? val['rem'] ?? json['remMinutes']);
+
+    final rawStages = val['sleepStages'] ??
+        val['stages'] ??
+        val['segments'] ??
+        json['sleepStages'] ??
+        json['stages'] ??
+        json['segments'];
+
+    if (rawStages is List) {
+      int stageAwake = 0;
+      int stageLight = 0;
+      int stageDeep = 0;
+      int stageRem = 0;
+      for (final s in rawStages) {
+        if (s is Map<String, dynamic>) {
+          final type = (s['stage'] ?? s['type'] ?? s['sleepStage'])?.toString().toLowerCase() ?? '';
+          final dur = parseMinutes(s['duration'] ?? s['durationMinutes']) ??
+              (() {
+                final sStart = DateTime.tryParse(s['startTime']?.toString() ?? '');
+                final sEnd = DateTime.tryParse(s['endTime']?.toString() ?? '');
+                if (sStart != null && sEnd != null) {
+                  return sEnd.difference(sStart).inMinutes;
+                }
+                return 0;
+              })();
+          if (type.contains('awake') || type.contains('wake') || type.contains('out_of_bed')) {
+            stageAwake += dur;
+          } else if (type.contains('light')) {
+            stageLight += dur;
+          } else if (type.contains('deep')) {
+            stageDeep += dur;
+          } else if (type.contains('rem')) {
+            stageRem += dur;
+          }
+        }
+      }
+      if (stageAwake > 0) awakeMin = (awakeMin ?? 0) + stageAwake;
+      if (stageLight > 0) lightMin = (lightMin ?? 0) + stageLight;
+      if (stageDeep > 0) deepMin = (deepMin ?? 0) + stageDeep;
+      if (stageRem > 0) remMin = (remMin ?? 0) + stageRem;
+    }
+
+    final netAsleep = parseMinutes(val['asleepDuration'] ??
+        val['asleepMinutes'] ??
+        val['timeAsleep'] ??
+        val['netDuration'] ??
+        val['activeTimeMillis'] ??
+        json['activeTimeMillis']);
+
+    // In Fitbit / Google Health, sleep duration is net time asleep (total time in bed minus awake time).
+    int duration;
+    if (netAsleep != null && netAsleep > 0) {
+      duration = netAsleep;
+      awakeMin ??= (totalIntervalMin > duration ? totalIntervalMin - duration : null);
+    } else if (awakeMin != null && awakeMin > 0 && totalIntervalMin > awakeMin) {
+      duration = totalIntervalMin - awakeMin;
+    } else {
+      duration = totalIntervalMin;
+    }
+
+    // For sleep sessions, the physiological date is ALWAYS the morning wake-up date
+    // (i.e. if the session crossed midnight or ends after 4:00 AM local time, it belongs to the morning date).
+    final localStart = start.toLocal();
+    final localEnd = end.toLocal();
+    final isMorningWakeup = localEnd.hour >= 4 ||
+        localEnd.difference(localStart).inHours >= 3 ||
+        localEnd.day != localStart.day;
+    final effectiveSleepDate = isMorningWakeup ? localEnd : localStart;
+    final sleepDate =
+        DateFormat('yyyy-MM-dd').format(effectiveSleepDate);
+
+    int? score = (val['sleepScore'] as num?)?.toInt() ??
+        (val['score'] as num?)?.toInt() ??
+        (json['sleepScore'] as num?)?.toInt();
+
+    // If sleep score is omitted from the API payload, compute standard wearable score (0-100)
+    if (score == null && duration > 0) {
+      final durationRatio = (duration / 480.0).clamp(0.0, 1.0);
+      final durationPts = (durationRatio * 44.0).clamp(0.0, 44.0);
+      double qualityPts = 18.0; // Standard baseline for restorative sleep (deep/rem)
+      if (deepMin != null && remMin != null && duration > 0) {
+        final restorativeRatio = (deepMin + remMin) / duration;
+        qualityPts = (restorativeRatio / 0.45).clamp(0.0, 1.0) * 22.0;
+      }
+      double efficiencyPts = 18.0;
+      if (awakeMin != null && (duration + awakeMin) > 0) {
+        final awakeRatio = awakeMin / (duration + awakeMin);
+        if (awakeRatio <= 0.08) {
+          efficiencyPts = 23.0;
+        } else if (awakeRatio <= 0.15) {
+          efficiencyPts = 18.0;
+        } else {
+          efficiencyPts = 12.0;
+        }
+      }
+      score = (durationPts + qualityPts + efficiencyPts).round().clamp(0, 100);
+    }
+
     return GoogleHealthSleepData(
-      date: date.isNotEmpty ? date : DateFormat('yyyy-MM-dd').format(start),
+      date: sleepDate,
       startTime: start,
       endTime: end,
       durationMinutes: duration,
-      awakeMinutes: (val['awakeMinutes'] as num?)?.toInt(),
-      lightMinutes: (val['lightMinutes'] as num?)?.toInt(),
-      deepMinutes: (val['deepMinutes'] as num?)?.toInt(),
-      remMinutes: (val['remMinutes'] as num?)?.toInt(),
-      sleepScore: (val['sleepScore'] as num?)?.toInt() ??
-          (val['score'] as num?)?.toInt(),
+      awakeMinutes: awakeMin,
+      lightMinutes: lightMin,
+      deepMinutes: deepMin,
+      remMinutes: remMin,
+      sleepScore: score,
       source: json['dataSourceFamily'] as String?,
     );
   }
@@ -1615,10 +1743,18 @@ class GoogleHealthSleepDataManager
   Future<GoogleHealthResult<GoogleHealthSleepData>> fetch(
       GoogleHealthAPIURL url) async {
     final rawItems = await fetchAllPages(url);
+    debugPrint('[GoogleHealthSleepItems] 💤 Raw sleep items count: ${rawItems.length}');
+    for (int i = 0; i < rawItems.length; i++) {
+      debugPrint('[GoogleHealthSleepItems][$i] raw: ${jsonEncode(rawItems[i])}');
+    }
     final items = rawItems
         .map(GoogleHealthSleepData.fromJson)
         .where((e) => e.date.isNotEmpty)
         .toList();
+    for (int i = 0; i < items.length; i++) {
+      final s = items[i];
+      debugPrint('[GoogleHealthSleepItems][$i] parsed: date=${s.date} start=${s.startTime} end=${s.endTime} dur=${s.durationMinutes} score=${s.sleepScore} awake=${s.awakeMinutes}');
+    }
 
     return GoogleHealthResult(data: items);
   }

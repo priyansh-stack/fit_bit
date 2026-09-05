@@ -231,14 +231,53 @@ class GoogleFitnessService {
 
       final start = DateTime.fromMillisecondsSinceEpoch(startMillis);
       final end = DateTime.fromMillisecondsSinceEpoch(endMillis);
-      final durationMin = end.difference(start).inMinutes;
-      final dateStr = DateFormat('yyyy-MM-dd').format(start);
+      final totalIntervalMin = end.difference(start).inMinutes;
+
+      final activeMillis =
+          int.tryParse(session['activeTimeMillis']?.toString() ?? '') ?? 0;
+      final int durationMin;
+      final int? awakeMin;
+      if (activeMillis > 0 && (activeMillis / 60000).round() < totalIntervalMin) {
+        durationMin = (activeMillis / 60000).round();
+        final rawAwake = totalIntervalMin - durationMin;
+        awakeMin = rawAwake > 0 ? rawAwake : null;
+      } else {
+        durationMin = totalIntervalMin;
+        awakeMin = null;
+      }
+
+      // In health tracking standards (Fitbit, Google Health, Apple Health),
+      // overnight sleep sessions belong to the wake-up day.
+      final effectiveDate =
+          (end.difference(start).inHours >= 3 || end.hour >= 4) ? end : start;
+      final dateStr = DateFormat('yyyy-MM-dd').format(effectiveDate.toLocal());
+
+      int? score;
+      if (durationMin > 0) {
+        final durationRatio = (durationMin / 480.0).clamp(0.0, 1.0);
+        final durationPts = durationRatio * 50.0;
+        const qualityPts = 15.0;
+        double efficiencyPts = 20.0;
+        if (awakeMin != null && (durationMin + awakeMin) > 0) {
+          final awakeRatio = awakeMin / (durationMin + awakeMin);
+          if (awakeRatio <= 0.08) {
+            efficiencyPts = 24.0;
+          } else if (awakeRatio <= 0.15) {
+            efficiencyPts = 19.0;
+          } else {
+            efficiencyPts = 14.0;
+          }
+        }
+        score = (durationPts + qualityPts + efficiencyPts).round().clamp(0, 100);
+      }
 
       sleepRecords.add(SleepRecord(
         date: dateStr,
         startTime: start,
         endTime: end,
         durationMinutes: durationMin,
+        awakeMinutes: awakeMin,
+        sleepScore: score,
         source: 'google_fitness',
         updatedAt: DateTime.now(),
       ));

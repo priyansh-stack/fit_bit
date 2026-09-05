@@ -140,5 +140,43 @@ void main() {
       expect(sessions.first.durationMinutes, 480);
       expect(sessions.first.source, 'google_fitness');
     });
+
+    test('fetchSleepSessions attributes overnight sleep crossing midnight to wake-up date', () async {
+      // 2026-09-04 22:30:00 UTC = 1788561000000 ms
+      // 2026-09-05 07:15:00 UTC = 1788592500000 ms (525 min = 8h 45m)
+      final start = DateTime(2026, 9, 4, 22, 30);
+      final end = DateTime(2026, 9, 5, 7, 15);
+
+      final mockSleepResponse = {
+        'session': [
+          {
+            'startTimeMillis': '${start.millisecondsSinceEpoch}',
+            'endTimeMillis': '${end.millisecondsSinceEpoch}',
+            'activityType': 72,
+            'name': 'Overnight Sleep',
+          }
+        ]
+      };
+
+      final client = MockClient((request) async {
+        return http.Response(jsonEncode(mockSleepResponse), 200);
+      });
+
+      final service = GoogleFitnessService(client: client);
+      final credentials = GoogleHealthCredentials(
+        accessToken: 'fake_token',
+        tokenExpiry: DateTime.now().add(const Duration(hours: 1)),
+      );
+
+      final sessions = await service.fetchSleepSessions(
+        credentials: credentials,
+        startDate: DateTime(2026, 9, 4),
+        endDate: DateTime(2026, 9, 5),
+      );
+
+      expect(sessions.length, 1);
+      expect(sessions.first.date, '2026-09-05'); // Correctly attributed to morning wake-up day!
+      expect(sessions.first.durationMinutes, 525); // 8h 45m
+    });
   });
 }

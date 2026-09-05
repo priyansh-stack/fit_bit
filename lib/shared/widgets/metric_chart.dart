@@ -145,10 +145,11 @@ class LineMetricChart extends StatelessWidget {
         .map(((int, double) e) => FlSpot(e.$1.toDouble(), e.$2))
         .toList();
 
-    final minY =
-        values.fold<double>(values.first, (m, v) => v < m ? v : m) * 0.9;
-    final maxY =
-        values.fold<double>(values.first, (m, v) => v > m ? v : m) * 1.1;
+    final rawMin = values.fold<double>(values.first, (m, v) => v < m ? v : m);
+    final rawMax = values.fold<double>(values.first, (m, v) => v > m ? v : m);
+    final padding = (rawMax - rawMin) > 10 ? (rawMax - rawMin) * 0.15 : 5.0;
+    final minY = (rawMin - padding).clamp(0.0, double.infinity);
+    final maxY = rawMax + padding;
 
     return SizedBox(
       height: 140,

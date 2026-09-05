@@ -22,11 +22,35 @@ class HeartRateRecord {
   }
 
   factory HeartRateRecord.fromJson(Map<String, dynamic> json) {
+    DateTime ts;
+    final rawTs = json['timestamp'];
+    if (rawTs is Timestamp) {
+      ts = rawTs.toDate();
+    } else if (rawTs is DateTime) {
+      ts = rawTs;
+    } else if (rawTs is String) {
+      ts = DateTime.tryParse(rawTs) ?? DateTime.now();
+    } else if (rawTs is int) {
+      ts = DateTime.fromMillisecondsSinceEpoch(rawTs);
+    } else {
+      ts = DateTime.now();
+    }
+
+    DateTime? updated;
+    final rawUpdated = json['updatedAt'];
+    if (rawUpdated is Timestamp) {
+      updated = rawUpdated.toDate();
+    } else if (rawUpdated is DateTime) {
+      updated = rawUpdated;
+    } else if (rawUpdated is String) {
+      updated = DateTime.tryParse(rawUpdated);
+    }
+
     return HeartRateRecord(
-      timestamp: (json['timestamp'] as Timestamp).toDate(),
-      bpm: (json['bpm'] as num).toInt(),
+      timestamp: ts,
+      bpm: (json['bpm'] as num?)?.toInt() ?? 0,
       source: json['source'] as String?,
-      updatedAt: (json['updatedAt'] as Timestamp?)?.toDate(),
+      updatedAt: updated,
     );
   }
 
@@ -53,11 +77,21 @@ class HRVRecord {
   final DateTime? updatedAt;
 
   factory HRVRecord.fromJson(Map<String, dynamic> json) {
+    DateTime? updated;
+    final rawUpdated = json['updatedAt'];
+    if (rawUpdated is Timestamp) {
+      updated = rawUpdated.toDate();
+    } else if (rawUpdated is DateTime) {
+      updated = rawUpdated;
+    } else if (rawUpdated is String) {
+      updated = DateTime.tryParse(rawUpdated);
+    }
+
     return HRVRecord(
-      date: json['date'] as String,
-      rmssd: (json['rmssd'] as num).toDouble(),
+      date: json['date'] as String? ?? '',
+      rmssd: (json['rmssd'] as num?)?.toDouble() ?? 0.0,
       source: json['source'] as String?,
-      updatedAt: (json['updatedAt'] as Timestamp?)?.toDate(),
+      updatedAt: updated,
     );
   }
 

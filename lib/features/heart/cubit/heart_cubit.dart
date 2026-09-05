@@ -8,17 +8,24 @@ import '../../../core/constants/api_constants.dart';
 import '../../../core/models/health_daily.dart';
 import '../../../core/models/heart_rate_record.dart';
 import '../../../core/utils/date_utils.dart';
+import '../../../repositories/health_repository.dart';
 import 'heart_state.dart';
 
 export 'heart_state.dart';
 
 class HeartCubit extends Cubit<HeartState> {
   HeartCubit({
+    HealthRepository? healthRepository,
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
+  })  : _healthRepo = healthRepository,
+        _firestore = firestore ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance,
         super(const HeartState()) {
+    final user = _auth.currentUser;
+    if (user != null) {
+      _subscribe(user.uid);
+    }
     _authSub = _auth.authStateChanges().listen((user) {
       if (user != null) {
         _subscribe(user.uid);
@@ -30,6 +37,7 @@ class HeartCubit extends Cubit<HeartState> {
     });
   }
 
+  final HealthRepository? _healthRepo;
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
   StreamSubscription? _authSub;
@@ -43,57 +51,93 @@ class HeartCubit extends Cubit<HeartState> {
       return;
     }
 
-    final start = HealthDateUtils.lastNDates(14).first;
-
     _dailySub?.cancel();
-    _dailySub = _firestore
-        .collection(FirestorePaths.users)
-        .doc(uid)
-        .collection(FirestorePaths.healthDaily)
-        .where('date', isGreaterThanOrEqualTo: start)
-        .orderBy('date')
-        .snapshots()
-        .map((s) => s.docs.map(HealthDaily.fromFirestore).toList())
-        .listen(
-      (daily) {
-        emit(state.copyWith(
-          daily: daily,
-          isLoading: false,
-          errorMessage: () => null,
-        ));
-      },
-      onError: (e) {
-        emit(state.copyWith(
-          isLoading: false,
-          errorMessage: () => e.toString(),
-        ));
-      },
-    );
+    final repo = _healthRepo;
+    if (repo != null) {
+      _dailySub = repo.watchRecentSummaries(days: 14).listen(
+        (daily) {
+          emit(state.copyWith(
+            daily: daily,
+            isLoading: false,
+            errorMessage: () => null,
+          ));
+        },
+        onError: (e) {
+          emit(state.copyWith(
+            isLoading: false,
+            errorMessage: () => e.toString(),
+          ));
+        },
+      );
+    } else {
+      final start = HealthDateUtils.lastNDates(14).first;
+      _dailySub = _firestore
+          .collection(FirestorePaths.users)
+          .doc(uid)
+          .collection(FirestorePaths.healthDaily)
+          .where('date', isGreaterThanOrEqualTo: start)
+          .orderBy('date')
+          .snapshots()
+          .map((s) => s.docs.map(HealthDaily.fromFirestore).toList())
+          .listen(
+        (daily) {
+          emit(state.copyWith(
+            daily: daily,
+            isLoading: false,
+            errorMessage: () => null,
+          ));
+        },
+        onError: (e) {
+          emit(state.copyWith(
+            isLoading: false,
+            errorMessage: () => e.toString(),
+          ));
+        },
+      );
+    }
 
     _hrSub?.cancel();
-    _hrSub = _firestore
-        .collection(FirestorePaths.users)
-        .doc(uid)
-        .collection(FirestorePaths.heartRate)
-        .orderBy('timestamp', descending: true)
-        .limit(48)
-        .snapshots()
-        .map((s) => s.docs.map(HeartRateRecord.fromFirestore).toList())
-        .listen(
-      (recentHR) {
-        emit(state.copyWith(
-          recentHR: recentHR,
-          isLoading: false,
-          errorMessage: () => null,
-        ));
-      },
-      onError: (e) {
-        emit(state.copyWith(
-          isLoading: false,
-          errorMessage: () => e.toString(),
-        ));
-      },
-    );
+    if (repo != null) {
+      _hrSub = repo.watchRecentHeartRates(limit: 48).listen(
+        (recentHR) {
+          emit(state.copyWith(
+            recentHR: recentHR,
+            isLoading: false,
+            errorMessage: () => null,
+          ));
+        },
+        onError: (e) {
+          emit(state.copyWith(
+            isLoading: false,
+            errorMessage: () => e.toString(),
+          ));
+        },
+      );
+    } else {
+      _hrSub = _firestore
+          .collection(FirestorePaths.users)
+          .doc(uid)
+          .collection(FirestorePaths.heartRate)
+          .orderBy('timestamp', descending: true)
+          .limit(48)
+          .snapshots()
+          .map((s) => s.docs.map(HeartRateRecord.fromFirestore).toList())
+          .listen(
+        (recentHR) {
+          emit(state.copyWith(
+            recentHR: recentHR,
+            isLoading: false,
+            errorMessage: () => null,
+          ));
+        },
+        onError: (e) {
+          emit(state.copyWith(
+            isLoading: false,
+            errorMessage: () => e.toString(),
+          ));
+        },
+      );
+    }
   }
 
   void refresh() {

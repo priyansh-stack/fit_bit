@@ -52,15 +52,19 @@ void main() {
       expect(zones.activeZoneMinutes, 0);
     });
 
-    test('handles empty data safely', () {
-      final zones = HeartRateZones.fromBiometrics();
+    test('estimates zone minutes from totalActiveMinutes when raw records are empty', () {
+      final zones = HeartRateZones.fromBiometrics(
+        age: 30,
+        records: const [],
+        totalActiveMinutes: 20,
+      );
 
-      expect(zones.outOfZoneMinutes, 0);
-      expect(zones.fatBurnMinutes, 0);
-      expect(zones.cardioMinutes, 0);
+      // 20 * 0.7 = 14 fat burn, 6 cardio
+      expect(zones.fatBurnMinutes, 14);
+      expect(zones.cardioMinutes, 6);
       expect(zones.peakMinutes, 0);
-      expect(zones.activeZoneMinutes, 0);
-      expect(zones.progress, 0.0);
+      // AZM: 14 + (2 * 6) = 26
+      expect(zones.activeZoneMinutes, 26);
     });
   });
 }

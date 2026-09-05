@@ -54,22 +54,30 @@ class _SleepContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Sort sessions strictly by date descending, then startTime descending (newest first)
+    final sortedSessions = List<SleepRecord>.from(sessions)
+      ..sort((a, b) {
+        final dateCmp = b.date.compareTo(a.date);
+        if (dateCmp != 0) return dateCmp;
+        return b.startTime.compareTo(a.startTime);
+      });
+
     final labels = HealthDateUtils.lastNDates(14);
     final chartData = {
       for (final d in labels)
-        HealthDateUtils.toMonthDay(HealthDateUtils.fromIsoDate(d)): sessions
+        HealthDateUtils.toMonthDay(HealthDateUtils.fromIsoDate(d)): sortedSessions
                 .where((s) => s.date == d)
                 .map((s) => s.durationMinutes / 60.0)
                 .firstOrNull ??
             0.0,
     };
 
-    final avgSleep = sessions.isEmpty
+    final avgSleep = sortedSessions.isEmpty
         ? 0
-        : sessions.map((s) => s.durationMinutes).reduce((a, b) => a + b) ~/
-            sessions.length;
+        : sortedSessions.map((s) => s.durationMinutes).reduce((a, b) => a + b) ~/
+            sortedSessions.length;
 
-    final latestSession = sessions.isNotEmpty ? sessions.last : null;
+    final latestSession = sortedSessions.firstOrNull;
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -146,13 +154,13 @@ class _SleepContent extends StatelessWidget {
         Text('Sleep Sessions', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 12),
 
-        if (sessions.isEmpty)
+        if (sortedSessions.isEmpty)
           const EmptyDataView(
             message: 'No sleep sessions recorded.',
             icon: Icons.bedtime_rounded,
           )
         else
-          ...sessions.reversed.map((s) => _SleepSessionTile(session: s)),
+          ...sortedSessions.map((s) => _SleepSessionTile(session: s)),
       ],
     );
   }
@@ -177,10 +185,27 @@ class _SleepSessionTile extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                HealthDateUtils.toDisplayDate(session.startTime),
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w600),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    session.date.isNotEmpty
+                        ? HealthDateUtils.toDisplayDate(
+                            HealthDateUtils.fromIsoDate(session.date))
+                        : HealthDateUtils.toDisplayDate(session.startTime),
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${HealthDateUtils.toDisplayTime(session.startTime)} – ${HealthDateUtils.toDisplayTime(session.endTime)}'
+                    '${session.sleepScore != null ? ' · Score: ${session.sleepScore}' : ''}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.6),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ),
               Container(
                 padding:

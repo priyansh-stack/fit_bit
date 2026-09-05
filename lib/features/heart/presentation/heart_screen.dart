@@ -61,11 +61,14 @@ class _HeartContent extends StatelessWidget {
     final restingHrData = <String, double>{
       for (final d in labels)
         HealthDateUtils.toMonthDay(HealthDateUtils.fromIsoDate(d)): days
-                .where((e) => e.date == d && e.restingHeartRate != null)
+                .where((e) =>
+                    e.date == d &&
+                    e.restingHeartRate != null &&
+                    e.restingHeartRate! > 0)
                 .map((e) => e.restingHeartRate!.toDouble())
                 .firstOrNull ??
             0.0,
-    }..removeWhere((_, v) => v == 0);
+    }..removeWhere((_, v) => v <= 0);
 
     final validRHR = days
         .where((d) => d.restingHeartRate != null && d.restingHeartRate! > 0)
@@ -75,7 +78,25 @@ class _HeartContent extends StatelessWidget {
             validRHR.length
         : null;
 
-    final latest = days.isNotEmpty ? days.last : null;
+    final latestHrv = days.reversed
+        .where((d) => d.avgHrv != null && d.avgHrv! > 0)
+        .map((d) => d.avgHrv!)
+        .firstOrNull;
+
+    final latestSpo2 = days.reversed
+        .where((d) => d.avgSpo2 != null && d.avgSpo2! > 0)
+        .map((d) => d.avgSpo2!)
+        .firstOrNull;
+
+    final latestBreathing = days.reversed
+        .where((d) => d.breathingRate != null && d.breathingRate! > 0)
+        .map((d) => d.breathingRate!)
+        .firstOrNull;
+
+    final latestActiveMinutes = days.reversed
+        .where((d) => d.activeMinutes != null && d.activeMinutes! > 0)
+        .map((d) => d.activeMinutes!)
+        .firstOrNull;
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -131,8 +152,8 @@ class _HeartContent extends StatelessWidget {
           children: [
             _MetricCard(
               title: 'HRV (rMSSD)',
-              value: latest?.avgHrv != null
-                  ? '${latest!.avgHrv!.toStringAsFixed(0)} ms'
+              value: latestHrv != null
+                  ? '${latestHrv.toStringAsFixed(0)} ms'
                   : '--',
               icon: Icons.graphic_eq_rounded,
               color: const Color(0xFF8B5CF6),
@@ -140,8 +161,8 @@ class _HeartContent extends StatelessWidget {
             const SizedBox(width: 10),
             _MetricCard(
               title: 'SpO2',
-              value: latest?.avgSpo2 != null
-                  ? '${latest!.avgSpo2!.toStringAsFixed(1)}%'
+              value: latestSpo2 != null
+                  ? '${latestSpo2.toStringAsFixed(1)}%'
                   : '--',
               icon: Icons.water_drop_rounded,
               color: const Color(0xFF06B6D4),
@@ -149,8 +170,8 @@ class _HeartContent extends StatelessWidget {
             const SizedBox(width: 10),
             _MetricCard(
               title: 'Breathing',
-              value: latest?.breathingRate != null
-                  ? '${latest!.breathingRate!.toStringAsFixed(1)} rpm'
+              value: latestBreathing != null
+                  ? '${latestBreathing.toStringAsFixed(1)} rpm'
                   : '--',
               icon: Icons.air_rounded,
               color: const Color(0xFF10B981),
@@ -164,6 +185,7 @@ class _HeartContent extends StatelessWidget {
         HeartRateZonesCard(
           zones: HeartRateZones.fromBiometrics(
             records: recentHR,
+            totalActiveMinutes: latestActiveMinutes,
           ),
         ),
 

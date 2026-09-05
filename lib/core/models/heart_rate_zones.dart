@@ -69,35 +69,31 @@ class HeartRateZones extends Equatable {
     final cardioMin = (maxHr * 0.70).round();
     final peakMin = (maxHr * 0.85).round();
 
-    if (records.isNotEmpty) {
-      int outOfZoneCount = 0;
-      int fatBurnCount = 0;
-      int cardioCount = 0;
-      int peakCount = 0;
+    int outOfZoneCount = 0;
+    int fatBurnCount = 0;
+    int cardioCount = 0;
+    int peakCount = 0;
 
-      for (final r in records) {
-        final bpm = r.bpm;
-        if (bpm >= peakMin) {
-          peakCount++;
-        } else if (bpm >= cardioMin) {
-          cardioCount++;
-        } else if (bpm >= fatBurnMin) {
-          fatBurnCount++;
-        } else {
-          outOfZoneCount++;
-        }
+    for (final r in records) {
+      final bpm = r.bpm;
+      if (bpm >= peakMin) {
+        peakCount++;
+      } else if (bpm >= cardioMin) {
+        cardioCount++;
+      } else if (bpm >= fatBurnMin) {
+        fatBurnCount++;
+      } else {
+        outOfZoneCount++;
       }
+    }
 
-      return HeartRateZones(
-        maxHeartRate: maxHr,
-        fatBurnMin: fatBurnMin,
-        cardioMin: cardioMin,
-        peakMin: peakMin,
-        outOfZoneMinutes: outOfZoneCount,
-        fatBurnMinutes: fatBurnCount,
-        cardioMinutes: cardioCount,
-        peakMinutes: peakCount,
-      );
+    final elevatedCount = fatBurnCount + cardioCount + peakCount;
+    if (totalActiveMinutes != null && totalActiveMinutes > elevatedCount) {
+      final additional = totalActiveMinutes - elevatedCount;
+      final addFb = (additional * 0.70).round();
+      final addCd = additional - addFb;
+      fatBurnCount += addFb;
+      cardioCount += addCd;
     }
 
     return HeartRateZones(
@@ -105,10 +101,10 @@ class HeartRateZones extends Equatable {
       fatBurnMin: fatBurnMin,
       cardioMin: cardioMin,
       peakMin: peakMin,
-      outOfZoneMinutes: 0,
-      fatBurnMinutes: 0,
-      cardioMinutes: 0,
-      peakMinutes: 0,
+      outOfZoneMinutes: outOfZoneCount,
+      fatBurnMinutes: fatBurnCount,
+      cardioMinutes: cardioCount,
+      peakMinutes: peakCount,
     );
   }
 

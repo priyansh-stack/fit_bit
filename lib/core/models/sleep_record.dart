@@ -50,6 +50,21 @@ class SleepRecord {
   final String? source;
   final DateTime? updatedAt;
 
+  static DateTime _parseDateTime(dynamic val, [String? fallbackDate]) {
+    if (val is Timestamp) return val.toDate();
+    if (val is DateTime) return val;
+    if (val is int) return DateTime.fromMillisecondsSinceEpoch(val);
+    if (val is String) {
+      final parsed = DateTime.tryParse(val);
+      if (parsed != null) return parsed;
+    }
+    if (fallbackDate != null && fallbackDate.isNotEmpty) {
+      final dt = DateTime.tryParse(fallbackDate);
+      if (dt != null) return dt;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
   factory SleepRecord.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return SleepRecord.fromJson(data);
@@ -60,11 +75,12 @@ class SleepRecord {
         ?.map((e) => SleepStageSegment.fromJson(e as Map<String, dynamic>))
         .toList();
 
+    final dateStr = json['date']?.toString() ?? '';
     return SleepRecord(
-      date: json['date'] as String,
-      startTime: (json['startTime'] as Timestamp).toDate(),
-      endTime: (json['endTime'] as Timestamp).toDate(),
-      durationMinutes: (json['durationMinutes'] as num).toInt(),
+      date: dateStr,
+      startTime: _parseDateTime(json['startTime'], dateStr),
+      endTime: _parseDateTime(json['endTime'], dateStr),
+      durationMinutes: (json['durationMinutes'] as num?)?.toInt() ?? 0,
       awakeMinutes: (json['awakeMinutes'] as num?)?.toInt(),
       lightMinutes: (json['lightMinutes'] as num?)?.toInt(),
       deepMinutes: (json['deepMinutes'] as num?)?.toInt(),
@@ -72,7 +88,7 @@ class SleepRecord {
       sleepScore: (json['sleepScore'] as num?)?.toInt(),
       stages: stagesList,
       source: json['source'] as String?,
-      updatedAt: (json['updatedAt'] as Timestamp?)?.toDate(),
+      updatedAt: json['updatedAt'] != null ? _parseDateTime(json['updatedAt']) : null,
     );
   }
 
@@ -106,8 +122,8 @@ class SleepStageSegment {
 
   factory SleepStageSegment.fromJson(Map<String, dynamic> json) {
     return SleepStageSegment(
-      start: (json['start'] as Timestamp).toDate(),
-      end: (json['end'] as Timestamp).toDate(),
+      start: SleepRecord._parseDateTime(json['start']),
+      end: SleepRecord._parseDateTime(json['end']),
       stage: sleepStageFromString(json['stage'] as String?),
     );
   }

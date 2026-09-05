@@ -61,10 +61,14 @@ class App extends StatelessWidget {
             create: (_) => ActivityCubit(),
           ),
           BlocProvider<SleepCubit>(
-            create: (_) => SleepCubit(),
+            create: (context) => SleepCubit(
+              healthRepository: context.read<HealthRepository>(),
+            ),
           ),
           BlocProvider<HeartCubit>(
-            create: (_) => HeartCubit(),
+            create: (context) => HeartCubit(
+              healthRepository: context.read<HealthRepository>(),
+            ),
           ),
         ],
         child: const _AppView(),

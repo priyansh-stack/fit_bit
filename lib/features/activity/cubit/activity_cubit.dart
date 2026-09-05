@@ -19,6 +19,10 @@ class ActivityCubit extends Cubit<ActivityState> {
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance,
         super(const ActivityState()) {
+    final user = _auth.currentUser;
+    if (user != null) {
+      _subscribe(user.uid);
+    }
     _authSub = _auth.authStateChanges().listen((user) {
       if (user != null) {
         _subscribe(user.uid);

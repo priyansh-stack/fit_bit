@@ -40,7 +40,8 @@ class HealthDateUtils {
   static String toMonthDay(DateTime dt) => _displayMonthDay.format(dt);
 
   /// Time: "10:30 AM".
-  static String toDisplayTime(DateTime dt) => _displayTimeFormat.format(dt);
+  static String toDisplayTime(DateTime dt) =>
+      _displayTimeFormat.format(dt.toLocal());
 
   // ---------------------------------------------------------------------------
   // String → DateTime

@@ -128,4 +128,46 @@ void main() {
       expect(data.activeMinutesSum, 45);
     });
   });
+
+  group('GoogleHealthSleepData Model Tests', () {
+    test('attributes overnight sleep starting on day N and ending morning N+1 to wake-up day', () {
+      // 21:53 to 07:15 = 562 min in bed, minus 37 min awake = 525 net asleep min (8h 45m)
+      final json = {
+        'startTime': '2026-09-04T21:53:00Z',
+        'endTime': '2026-09-05T07:15:00Z',
+        'sleep': {
+          'awakeMinutes': 37,
+          'lightMinutes': 250,
+          'deepMinutes': 110,
+          'remMinutes': 128,
+          'sleepScore': 89,
+        }
+      };
+
+      final data = GoogleHealthSleepData.fromJson(json);
+      expect(data.date, '2026-09-05'); // Wake-up day!
+      expect(data.durationMinutes, 525); // 8h 45m net asleep
+      expect(data.sleepScore, 89);
+      expect(data.awakeMinutes, 37);
+    });
+
+    test('computes estimated wearable score when score is omitted from API payload', () {
+      final json = {
+        'startTime': '2026-09-04T21:53:00Z',
+        'endTime': '2026-09-05T07:15:00Z',
+        'sleep': {
+          'awakeMinutes': 37,
+          'deepMinutes': 110,
+          'remMinutes': 120,
+        }
+      };
+
+      final data = GoogleHealthSleepData.fromJson(json);
+      expect(data.date, '2026-09-05');
+      expect(data.durationMinutes, 525);
+      expect(data.sleepScore, isNotNull);
+      expect(data.sleepScore!, greaterThanOrEqualTo(80));
+      expect(data.sleepScore!, lessThanOrEqualTo(100));
+    });
+  });
 }

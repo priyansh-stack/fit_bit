@@ -202,7 +202,12 @@ class DashboardScreen extends StatelessWidget {
                         onRetry: () => context.read<DashboardCubit>().refresh(),
                       )
                     else
-                      _MetricGrid(today: today, isLoading: false, goals: goals),
+                      _MetricGrid(
+                        today: today,
+                        isLoading: false,
+                        goals: goals,
+                        recentDays: dashboardState.recentDays,
+                      ),
 
                     const SizedBox(height: 24),
 
@@ -260,11 +265,13 @@ class _MetricGrid extends StatelessWidget {
     required this.today,
     required this.isLoading,
     required this.goals,
+    this.recentDays = const [],
   });
 
   final HealthDaily? today;
   final bool isLoading;
   final UserGoals goals;
+  final List<HealthDaily> recentDays;
 
   @override
   Widget build(BuildContext context) {
@@ -280,9 +287,33 @@ class _MetricGrid extends StatelessWidget {
         ? (today!.activeMinutes! / goals.activeMinutesGoal * 100).round()
         : null;
 
-    final sleepHours = today?.sleepMinutes != null && today!.sleepMinutes! > 0
-        ? (today!.sleepMinutes! / 60)
+    // Look at today's sleep, or fallback to the most recent night with sleep
+    final effectiveSleepDay =
+        (today?.sleepMinutes != null && today!.sleepMinutes! > 0)
+            ? today
+            : recentDays.reversed
+                .where((d) => d.sleepMinutes != null && d.sleepMinutes! > 0)
+                .firstOrNull;
+
+    final isPastNight =
+        (today?.sleepMinutes == null || today!.sleepMinutes == 0) &&
+            effectiveSleepDay != null;
+
+    final sleepMinutes = effectiveSleepDay?.sleepMinutes;
+    final sleepHours = sleepMinutes != null && sleepMinutes > 0
+        ? (sleepMinutes / 60)
         : null;
+
+    final score = effectiveSleepDay?.sleepScore;
+    final qualityStr =
+        score != null ? '$score · ${_getSleepQuality(score)}' : null;
+
+    final sleepSubtitle = isPastNight
+        ? 'Last night · ${qualityStr ?? (sleepHours != null ? "${sleepHours.toStringAsFixed(1)}h" : "")}'
+        : (qualityStr ??
+            (sleepHours != null
+                ? '${sleepHours.toStringAsFixed(1)}h / ${goals.sleepHoursGoal.toStringAsFixed(1)}h goal'
+                : null));
 
     return GridView.count(
       crossAxisCount: 2,
@@ -302,22 +333,24 @@ class _MetricGrid extends StatelessWidget {
           color: AppTheme.stepsColor,
           isLoading: isLoading,
           isEmpty: today?.steps == null && !isLoading,
+          onTap: () => context.go(AppRoute.activity),
         ),
         HealthCard(
           title: 'Calories',
           value: today?.calories != null && today!.calories! > 0
-              ? '${_fmt(today!.calories!)} kcal'
+              ? '${_fmtCalories(today!.calories!)} kcal'
               : '--',
           subtitle: calPercent != null
               ? (today?.activeCalories != null && today!.activeCalories! > 0
                   ? '$calPercent% (${today!.activeCalories} active)'
-                  : '$calPercent% of ${_fmt(goals.calorieGoal)} kcal')
+                  : '$calPercent% of ${_fmtCalories(goals.calorieGoal)} kcal')
               : null,
           icon: Icons.local_fire_department_rounded,
           color: AppTheme.caloriesColor,
           isLoading: isLoading,
           isEmpty:
               (today?.calories == null || today!.calories == 0) && !isLoading,
+          onTap: () => context.go(AppRoute.activity),
         ),
         HealthCard(
           title: 'Distance',
@@ -328,6 +361,7 @@ class _MetricGrid extends StatelessWidget {
           color: AppTheme.distanceColor,
           isLoading: isLoading,
           isEmpty: (today == null || today!.distanceKm == 0) && !isLoading,
+          onTap: () => context.go(AppRoute.activity),
         ),
         HealthCard(
           title: 'Active Min',
@@ -341,6 +375,7 @@ class _MetricGrid extends StatelessWidget {
           color: AppTheme.activeColor,
           isLoading: isLoading,
           isEmpty: today?.activeMinutes == null && !isLoading,
+          onTap: () => context.go(AppRoute.activity),
         ),
         HealthCard(
           title: 'Heart Rate',
@@ -354,18 +389,17 @@ class _MetricGrid extends StatelessWidget {
           isEmpty: (today?.restingHeartRate == null ||
                   today!.restingHeartRate == 0) &&
               !isLoading,
+          onTap: () => context.go(AppRoute.heart),
         ),
         HealthCard(
           title: 'Sleep',
-          value: HealthDateUtils.formatSleepMinutes(today?.sleepMinutes),
-          subtitle: sleepHours != null
-              ? '${sleepHours.toStringAsFixed(1)}h / ${goals.sleepHoursGoal.toStringAsFixed(1)}h goal'
-              : (today?.sleepScore != null ? 'Score: ${today!.sleepScore}' : null),
+          value: HealthDateUtils.formatSleepMinutes(sleepMinutes),
+          subtitle: sleepSubtitle,
           icon: Icons.bedtime_rounded,
           color: AppTheme.sleepColor,
           isLoading: isLoading,
-          isEmpty: (today?.sleepMinutes == null || today!.sleepMinutes == 0) &&
-              !isLoading,
+          isEmpty: (sleepMinutes == null || sleepMinutes == 0) && !isLoading,
+          onTap: () => context.go(AppRoute.sleep),
         ),
       ],
     );
@@ -376,6 +410,23 @@ class _MetricGrid extends StatelessWidget {
       return '${(n / 1000).toStringAsFixed(n % 1000 == 0 ? 0 : 1)}k';
     }
     return n.toString();
+  }
+
+  static String _fmtCalories(int n) {
+    if (n >= 100000) {
+      return '${(n / 1000).toStringAsFixed(0)}k';
+    }
+    return n.toString().replaceAllMapped(
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (Match m) => '${m[1]},',
+        );
+  }
+
+  static String _getSleepQuality(int score) {
+    if (score >= 90) return 'Excellent';
+    if (score >= 80) return 'Good';
+    if (score >= 60) return 'Fair';
+    return 'Poor';
   }
 }
 
