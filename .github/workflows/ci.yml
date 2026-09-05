@@ -82,22 +82,42 @@ jobs:
           cache: true
 
       - name: Set up Android Keystore
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
-          if [ -n "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" ]; then
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
             mkdir -p ~/.android
-            echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
             echo "Using custom signing keystore from secrets."
           fi
 
       - name: Prepare google-services.json for CI
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
           if [ ! -f android/app/google-services.json ]; then
-            if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
-              echo "${{ secrets.GOOGLE_SERVICES_JSON }}" > android/app/google-services.json
-              echo "Using production google-services.json from secrets."
+            if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+              echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > android/app/google-services.json
+              echo "Using base64-decoded google-services.json from GOOGLE_SERVICES_JSON_BASE64."
+            elif [ -n "$GOOGLE_SERVICES_JSON" ]; then
+              printf '%s\n' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+              # In case GOOGLE_SERVICES_JSON was base64 encoded
+              if ! grep -q '^{' android/app/google-services.json && echo "$GOOGLE_SERVICES_JSON" | base64 -d >/dev/null 2>&1; then
+                echo "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
+                echo "Decoded base64-encoded GOOGLE_SERVICES_JSON."
+              else
+                echo "Using raw GOOGLE_SERVICES_JSON from secrets."
+              fi
             else
               cp android/app/google-services.json.example android/app/google-services.json
-              echo "Warning: Using mock google-services.json. Provide GOOGLE_SERVICES_JSON secret for full runtime parity."
+              echo "Warning: Using mock google-services.json.example. Provide GOOGLE_SERVICES_JSON secret for full runtime parity."
+            fi
+
+            # Robust JSON validation: Ensure the resulting file is valid JSON before Gradle runs
+            if ! python3 -m json.tool android/app/google-services.json > /dev/null 2>&1; then
+              echo "::warning::android/app/google-services.json is malformed or corrupted! Falling back to google-services.json.example to ensure build succeeds."
+              cp -f android/app/google-services.json.example android/app/google-services.json
             fi
           fi
 
