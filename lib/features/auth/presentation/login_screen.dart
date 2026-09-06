@@ -80,32 +80,13 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  Future<void> _signInAsGuest() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final repo = context.read<AuthRepository>();
-      await repo.signInAnonymously();
-      if (mounted) context.go(AppRoute.home);
-    } on AppException catch (e) {
-      setState(() => _errorMessage = e.message);
-    } catch (e) {
-      if (mounted) context.go(AppRoute.home);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
   String _formatError(dynamic e) {
     final str = e.toString();
     if (str.contains('10') || str.contains('DEVELOPER_ERROR')) {
       return 'Google Sign-In needs your debug SHA-1 added to Firebase Console.\n\nDebug SHA-1:\nB4:81:52:24:7B:1C:20:9E:A8:0D:01:0D:AF:80:26:61:9E:45:5B:CD';
     }
     if (str.contains('Invalid Value') || str.contains('invalid-credential')) {
-      return 'Sign-in credential validation failed. Please retry or use Demo Mode.';
+      return 'Sign-in credential validation failed. Please retry.';
     }
     if (str.contains('network_error') || str.contains('Network error')) {
       return 'Network connection issue. Please check your internet connection.';
@@ -323,30 +304,7 @@ class _LoginScreenState extends State<LoginScreen>
                         ),
                       ),
 
-                      const SizedBox(height: 12),
-
-                      // Guest / Demo mode button for instant preview
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _isLoading ? null : _signInAsGuest,
-                          icon: const Icon(Icons.explore_rounded, size: 18),
-                          label: const Text('Explore Dashboard (Demo Mode)'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor:
-                                Colors.white.withValues(alpha: 0.85),
-                            side: BorderSide(
-                                color: Colors.white.withValues(alpha: 0.2)),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            textStyle: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 24),
 
                       Text(
                         'By signing in, you agree to our Terms of Service\nand Privacy Policy.',
