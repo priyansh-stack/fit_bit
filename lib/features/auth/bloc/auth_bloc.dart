@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/errors/app_exception.dart';
+import '../../../core/services/fcm_service.dart';
 import '../data/auth_repository.dart';
 import 'auth_event.dart';
 import 'auth_state.dart';
@@ -33,6 +34,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) async {
     final user = _authRepository.currentUser;
     if (user != null) {
+      FitbitFcmService.instance.syncUserSession(user.uid);
       emit(Authenticated(user));
       return;
     }
@@ -44,6 +46,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           .firstWhere((u) => u != null)
           .timeout(const Duration(milliseconds: 2500));
       if (restoredUser != null) {
+        FitbitFcmService.instance.syncUserSession(restoredUser.uid);
         emit(Authenticated(restoredUser));
         return;
       }
@@ -51,6 +54,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
     final fallbackUser = _authRepository.currentUser;
     if (fallbackUser != null) {
+      FitbitFcmService.instance.syncUserSession(fallbackUser.uid);
       emit(Authenticated(fallbackUser));
       return;
     }
@@ -64,6 +68,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) {
     final user = event.user;
     if (user != null) {
+      FitbitFcmService.instance.syncUserSession(user.uid);
       emit(Authenticated(user));
     } else {
       emit(const Unauthenticated());
@@ -77,6 +82,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     emit(const AuthLoading());
     try {
       final user = await _authRepository.signInWithGoogle();
+      FitbitFcmService.instance.syncUserSession(user.uid);
       emit(Authenticated(user));
     } on SignInCancelledException {
       // Revert to unauthenticated without error message

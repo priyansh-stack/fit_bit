@@ -1,9 +1,7 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // ─── Helper functions ────────────────────────────────────────────────
+    // ─── Auth Helpers ────────────────────────────────────────────────────────
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -12,53 +10,118 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == uid;
     }
 
-    // ─── Users collection ────────────────────────────────────────────────
+    // ─── User Space: users/{uid} ─────────────────────────────────────────────
     match /users/{uid} {
-      // Users can only read and write their own user profile document.
+      // 1. User anchor document
       allow read, write: if isOwner(uid);
 
-      // ─── Health daily summaries ───────────────────────────────────────
+      // 2. Common data shared across apps (profile, account)
+      match /common/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // 3. Shared Health Data
+      // Strictly defined categories: daily, heart_rate, sleep, activity, metrics
+      // No broad recursive wildcard.
+      match /shared_health/{category} {
+        allow read, write: if isOwner(uid) && category in ['daily', 'heart_rate', 'sleep', 'activity', 'metrics'];
+
+        // Health records inside category (e.g. records/{recordId})
+        match /{subcollection}/{recordId} {
+          allow read, write: if isOwner(uid) && category in ['daily', 'heart_rate', 'sleep', 'activity', 'metrics'];
+        }
+      }
+
+      // 4. App-Specific Data: apps/{appId}
+      // Strictly defined apps: fitbit, male_vitality
+      match /apps/{appId} {
+        allow read, write: if isOwner(uid) && appId in ['fitbit', 'male_vitality'];
+
+        // Subcollections under app (e.g. apps/fitbit/connection/google_health, apps/male_vitality/onboarding/state)
+        match /{section}/{documentId} {
+          allow read, write: if isOwner(uid) && appId in ['fitbit', 'male_vitality'];
+
+          // Nested subcollections if any (e.g. clinical modules)
+          match /{subSection}/{subDocId} {
+            allow read, write: if isOwner(uid) && appId in ['fitbit', 'male_vitality'];
+          }
+        }
+      }
+
+      // 5. Legacy Collections for Seamless Backward Compatibility & Transition Fallback
       match /healthDaily/{date} {
         allow read, write: if isOwner(uid);
       }
-
-      // ─── Heart rate records ───────────────────────────────────────────
       match /heartRate/{recordId} {
         allow read, write: if isOwner(uid);
       }
-
-      // ─── Sleep sessions ───────────────────────────────────────────────
       match /sleep/{sessionId} {
         allow read, write: if isOwner(uid);
       }
-
-      // ─── Exercise records ─────────────────────────────────────────────
       match /exercise/{recordId} {
         allow read, write: if isOwner(uid);
       }
-
-      // ─── Health metrics (SpO2, HRV, etc.) ─────────────────────────────
+      match /health_metrics/{metricId} {
+        allow read, write: if isOwner(uid);
+      }
       match /healthMetrics/{metricId} {
         allow read, write: if isOwner(uid);
       }
-
-      // ─── Google Health connections ────────────────────────────────────
       match /connections/{connectionId} {
         allow read, write: if isOwner(uid);
       }
-
-      // ─── Sync checkpoints ─────────────────────────────────────────────
       match /sync/{syncType} {
         allow read, write: if isOwner(uid);
       }
-
-      // ─── User settings & goals ─────────────────────────────────────────
       match /settings/{settingId} {
+        allow read, write: if isOwner(uid);
+      }
+      match /profile/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+      match /lifestyle/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+      match /mood_entries/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+      match /substance/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+      match /testosterone_logs/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+      match /semen_analyses/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+      match /emergency/{docId} {
         allow read, write: if isOwner(uid);
       }
     }
 
-    // Deny all other access
+    // Health imports collection (legacy)
+    match /health_imports/{uid} {
+      allow read, write: if isOwner(uid);
+      match /{allPaths=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // Public clinical reference data (read-only for authenticated users)
+    match /therapists/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+    match /crisis_resources/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+    match /crisis_centers/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // Strict deny-all fallback for everything else
     match /{document=**} {
       allow read, write: if false;
     }

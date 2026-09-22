@@ -287,33 +287,21 @@ class _MetricGrid extends StatelessWidget {
         ? (today!.activeMinutes! / goals.activeMinutesGoal * 100).round()
         : null;
 
-    // Look at today's sleep, or fallback to the most recent night with sleep
-    final effectiveSleepDay =
+    // Look at today's sleep only (do not fallback to past night when no sleep is recorded today)
+    final sleepMinutes =
         (today?.sleepMinutes != null && today!.sleepMinutes! > 0)
-            ? today
-            : recentDays.reversed
-                .where((d) => d.sleepMinutes != null && d.sleepMinutes! > 0)
-                .firstOrNull;
+            ? today!.sleepMinutes
+            : null;
+    final sleepHours = sleepMinutes != null ? (sleepMinutes / 60) : null;
 
-    final isPastNight =
-        (today?.sleepMinutes == null || today!.sleepMinutes == 0) &&
-            effectiveSleepDay != null;
-
-    final sleepMinutes = effectiveSleepDay?.sleepMinutes;
-    final sleepHours = sleepMinutes != null && sleepMinutes > 0
-        ? (sleepMinutes / 60)
-        : null;
-
-    final score = effectiveSleepDay?.sleepScore;
+    final score = sleepMinutes != null ? today?.sleepScore : null;
     final qualityStr =
         score != null ? '$score · ${_getSleepQuality(score)}' : null;
 
-    final sleepSubtitle = isPastNight
-        ? 'Last night · ${qualityStr ?? (sleepHours != null ? "${sleepHours.toStringAsFixed(1)}h" : "")}'
-        : (qualityStr ??
-            (sleepHours != null
-                ? '${sleepHours.toStringAsFixed(1)}h / ${goals.sleepHoursGoal.toStringAsFixed(1)}h goal'
-                : null));
+    final sleepSubtitle = qualityStr ??
+        (sleepHours != null
+            ? '${sleepHours.toStringAsFixed(1)}h / ${goals.sleepHoursGoal.toStringAsFixed(1)}h goal'
+            : 'No sleep recorded');
 
     // Look at today's resting HR, or fallback to the most recent day with resting HR
     final effectiveHeartDay =

@@ -27,7 +27,23 @@ class FirestorePaths {
   // Top-level collections
   static const String users = 'users';
 
-  // Sub-collections under users/{uid}
+  // Target Architecture: Shared Health (Source of Truth)
+  static const String sharedHealth = 'shared_health';
+  static const String categoryDaily = 'daily';
+  static const String categoryHeartRate = 'heart_rate';
+  static const String categorySleep = 'sleep';
+  static const String categoryExercise = 'activity';
+  static const String categoryMetrics = 'metrics';
+  static const String records = 'records';
+
+  // Target Architecture: Common & App-Specific
+  static const String common = 'common';
+  static const String apps = 'apps';
+  static const String appFitbit = 'fitbit';
+  static const String appMaleVitality = 'male_vitality';
+  static const String connection = 'connection';
+
+  // Sub-collections under users/{uid} (Legacy Fallbacks)
   static const String connections = 'connections';
   static const String healthDaily = 'healthDaily';
   static const String heartRate = 'heartRate';
@@ -65,12 +81,12 @@ class HealthDataTypes {
 
   static const String steps = 'steps';
   static const String distance = 'distance';
-  static const String calories = 'calories';
+  static const String calories = 'total-calories';
   static const String activeCalories = 'active-calories';
   static const String activeMinutes = 'active-minutes';
   static const String sedentaryPeriod = 'sedentary-period';
   static const String heartRate = 'heart-rate';
-  static const String restingHeartRate = 'heart-rate';
+  static const String restingHeartRate = 'daily-resting-heart-rate';
   static const String heartRateVariability = 'heart-rate-variability';
   static const String sleep = 'sleep';
   static const String exercise = 'exercise';

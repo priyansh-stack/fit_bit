@@ -2,6 +2,7 @@
     <!-- Required for network access to Firebase / Google APIs -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Required for on-device activity recognition / step sensor access if needed -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
 

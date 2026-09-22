@@ -51,7 +51,7 @@ void main() {
       );
 
       expect(url.isRollUp, isFalse);
-      expect(url.url, contains('/dataTypes/heart-rate/dataPoints'));
+      expect(url.url, contains('/dataTypes/daily-resting-heart-rate/dataPoints'));
     });
   });
 

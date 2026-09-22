@@ -8,15 +8,18 @@ import '../../../core/constants/api_constants.dart';
 import '../../../core/models/exercise_record.dart';
 import '../../../core/models/health_daily.dart';
 import '../../../core/utils/date_utils.dart';
+import '../../../repositories/health_repository.dart';
 import 'activity_state.dart';
 
 export 'activity_state.dart';
 
 class ActivityCubit extends Cubit<ActivityState> {
   ActivityCubit({
+    HealthRepository? healthRepository,
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
+  })  : _healthRepo = healthRepository,
+        _firestore = firestore ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance,
         super(const ActivityState()) {
     final user = _auth.currentUser;
@@ -34,6 +37,7 @@ class ActivityCubit extends Cubit<ActivityState> {
     });
   }
 
+  final HealthRepository? _healthRepo;
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
   StreamSubscription? _authSub;
@@ -47,57 +51,97 @@ class ActivityCubit extends Cubit<ActivityState> {
       return;
     }
 
-    final start = HealthDateUtils.lastNDates(14).first;
-
     _historySub?.cancel();
-    _historySub = _firestore
-        .collection(FirestorePaths.users)
-        .doc(uid)
-        .collection(FirestorePaths.healthDaily)
-        .where('date', isGreaterThanOrEqualTo: start)
-        .orderBy('date')
-        .snapshots()
-        .map((s) => s.docs.map(HealthDaily.fromFirestore).toList())
-        .listen(
-      (history) {
-        emit(state.copyWith(
-          history: history,
-          isLoading: false,
-          errorMessage: () => null,
-        ));
-      },
-      onError: (e) {
-        emit(state.copyWith(
-          isLoading: false,
-          errorMessage: () => e.toString(),
-        ));
-      },
-    );
+    final repo = _healthRepo;
+    if (repo != null) {
+      _historySub = repo.watchRecentSummaries(days: 14).listen(
+        (history) {
+          emit(state.copyWith(
+            history: history,
+            isLoading: false,
+            errorMessage: () => null,
+          ));
+        },
+        onError: (e) {
+          emit(state.copyWith(
+            isLoading: false,
+            errorMessage: () => e.toString(),
+          ));
+        },
+      );
+    } else {
+      final start = HealthDateUtils.lastNDates(14).first;
+      _historySub = _firestore
+          .collection(FirestorePaths.users)
+          .doc(uid)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categoryDaily)
+          .collection(FirestorePaths.records)
+          .where('date', isGreaterThanOrEqualTo: start)
+          .orderBy('date')
+          .snapshots()
+          .map((s) => s.docs.map(HealthDaily.fromFirestore).toList())
+          .listen(
+        (history) {
+          emit(state.copyWith(
+            history: history,
+            isLoading: false,
+            errorMessage: () => null,
+          ));
+        },
+        onError: (e) {
+          emit(state.copyWith(
+            isLoading: false,
+            errorMessage: () => e.toString(),
+          ));
+        },
+      );
+    }
 
     _exerciseSub?.cancel();
-    _exerciseSub = _firestore
-        .collection(FirestorePaths.users)
-        .doc(uid)
-        .collection(FirestorePaths.exercise)
-        .orderBy('startTime', descending: true)
-        .limit(10)
-        .snapshots()
-        .map((s) => s.docs.map(ExerciseRecord.fromFirestore).toList())
-        .listen(
-      (exercises) {
-        emit(state.copyWith(
-          exercises: exercises,
-          isLoading: false,
-          errorMessage: () => null,
-        ));
-      },
-      onError: (e) {
-        emit(state.copyWith(
-          isLoading: false,
-          errorMessage: () => e.toString(),
-        ));
-      },
-    );
+    if (repo != null) {
+      _exerciseSub = repo.watchRecentExercises(limit: 20).listen(
+        (exercises) {
+          emit(state.copyWith(
+            exercises: exercises,
+            isLoading: false,
+            errorMessage: () => null,
+          ));
+        },
+        onError: (e) {
+          emit(state.copyWith(
+            isLoading: false,
+            errorMessage: () => e.toString(),
+          ));
+        },
+      );
+    } else {
+      _exerciseSub = _firestore
+          .collection(FirestorePaths.users)
+          .doc(uid)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categoryExercise)
+          .collection(FirestorePaths.records)
+          .orderBy('startTime', descending: true)
+          .limit(20)
+          .snapshots()
+          .map((s) => s.docs.map(ExerciseRecord.fromFirestore).toList())
+          .listen(
+        (exercises) {
+          emit(state.copyWith(
+            exercises: exercises,
+            isLoading: false,
+            errorMessage: () => null,
+          ));
+        },
+        onError: (e) {
+          emit(state.copyWith(
+            isLoading: false,
+            errorMessage: () => e.toString(),
+          ));
+        },
+      );
+    }
   }
 
   void refresh() {

@@ -694,6 +694,34 @@ class GoogleHealthStepsAPIURL {
       );
 }
 
+class GoogleHealthDistanceAPIURL {
+  static GoogleHealthAPIURL day({required DateTime date}) =>
+      GoogleHealthAPIURL.day(dataType: HealthDataTypes.distance, date: date);
+  static GoogleHealthAPIURL dateRange({
+    required DateTime startDate,
+    required DateTime endDate,
+  }) =>
+      GoogleHealthAPIURL.dateRange(
+        dataType: HealthDataTypes.distance,
+        startDate: startDate,
+        endDate: endDate,
+      );
+}
+
+class GoogleHealthCaloriesAPIURL {
+  static GoogleHealthAPIURL day({required DateTime date}) =>
+      GoogleHealthAPIURL.day(dataType: HealthDataTypes.calories, date: date);
+  static GoogleHealthAPIURL dateRange({
+    required DateTime startDate,
+    required DateTime endDate,
+  }) =>
+      GoogleHealthAPIURL.dateRange(
+        dataType: HealthDataTypes.calories,
+        startDate: startDate,
+        endDate: endDate,
+      );
+}
+
 class GoogleHealthActiveMinutesAPIURL {
   static GoogleHealthAPIURL day({required DateTime date}) =>
       GoogleHealthAPIURL.day(
@@ -951,6 +979,26 @@ String _extractDate(Map<String, dynamic> json) {
     return json['date'] as String;
   }
 
+  // 0. Direct map object date: {year, month, day} in root or nested payload
+  for (final candidate in [
+    json['date'],
+    json['dailyRestingHeartRate']?['date'],
+    json['steps']?['date'],
+    json['distance']?['date'],
+    json['totalCalories']?['date'],
+    json['heartRate']?['date'],
+  ]) {
+    if (candidate is Map &&
+        candidate['year'] != null &&
+        candidate['month'] != null &&
+        candidate['day'] != null) {
+      final y = candidate['year'];
+      final m = candidate['month'].toString().padLeft(2, '0');
+      final d = candidate['day'].toString().padLeft(2, '0');
+      return '$y-$m-$d';
+    }
+  }
+
   // 1. Direct top-level civilStartTime / civilEndTime / civilTime
   for (final civilKey in [
     'civilStartTime',
@@ -1093,8 +1141,12 @@ String _extractDate(Map<String, dynamic> json) {
 Map<String, dynamic> _extractPayload(Map<String, dynamic> json) {
   for (final key in [
     'steps',
+    'distance',
+    'totalCalories',
+    'calories',
     'activeMinutes',
     'sedentaryPeriod',
+    'dailyRestingHeartRate',
     'restingHeartRate',
     'heartRate',
     'heartRateVariability',
@@ -1149,6 +1201,67 @@ class GoogleHealthStepsData {
           (json['dataSource'] is Map
               ? json['dataSource']['platform'] as String?
               : null),
+    );
+  }
+}
+
+class GoogleHealthDistanceData {
+  const GoogleHealthDistanceData({
+    required this.date,
+    required this.meters,
+    this.sourceFamily,
+  });
+
+  final String date;
+  final double meters;
+  final String? sourceFamily;
+
+  factory GoogleHealthDistanceData.fromJson(Map<String, dynamic> json) {
+    final date = _extractDate(json);
+    final val = _extractPayload(json);
+
+    double distMeters = 0.0;
+    if (val['millimetersSum'] != null) {
+      final mm = _extractDouble(val['millimetersSum']) ?? 0.0;
+      distMeters = mm / 1000.0;
+    } else if (val['distanceMetersSum'] != null || val['meters'] != null) {
+      distMeters =
+          _extractDouble(val['distanceMetersSum'] ?? val['meters']) ?? 0.0;
+    }
+
+    return GoogleHealthDistanceData(
+      date: date,
+      meters: distMeters,
+      sourceFamily: json['dataSourceFamily'] as String?,
+    );
+  }
+}
+
+class GoogleHealthCaloriesData {
+  const GoogleHealthCaloriesData({
+    required this.date,
+    required this.calories,
+    this.sourceFamily,
+  });
+
+  final String date;
+  final int calories;
+  final String? sourceFamily;
+
+  factory GoogleHealthCaloriesData.fromJson(Map<String, dynamic> json) {
+    final date = _extractDate(json);
+    final val = _extractPayload(json);
+
+    final kcal = _extractDouble(val['kcalSum'] ??
+            val['kcal'] ??
+            val['caloriesSum'] ??
+            val['calories']) ??
+        0.0;
+
+    return GoogleHealthCaloriesData(
+      date: date,
+      calories: kcal.round(),
+      sourceFamily: json['dataSourceFamily'] as String?,
     );
   }
 }
@@ -1222,6 +1335,99 @@ class GoogleHealthSedentaryPeriodData {
   }
 }
 
+class GoogleHealthExerciseData {
+  const GoogleHealthExerciseData({
+    required this.id,
+    required this.date,
+    required this.startTime,
+    required this.endTime,
+    required this.durationMinutes,
+    required this.activityType,
+    this.calories,
+    this.distanceMeters,
+    this.steps,
+    this.avgHeartRate,
+    this.maxHeartRate,
+    this.source,
+  });
+
+  final String id;
+  final String date;
+  final DateTime startTime;
+  final DateTime endTime;
+  final int durationMinutes;
+  final String activityType;
+  final int? calories;
+  final double? distanceMeters;
+  final int? steps;
+  final int? avgHeartRate;
+  final int? maxHeartRate;
+  final String? source;
+
+  factory GoogleHealthExerciseData.fromJson(Map<String, dynamic> json) {
+    final ex = (json['exercise'] is Map<String, dynamic>)
+        ? json['exercise'] as Map<String, dynamic>
+        : json;
+    final interval = ex['interval'] as Map<String, dynamic>? ?? {};
+    final stStr = interval['startTime'] as String?;
+    final etStr = interval['endTime'] as String?;
+    final startTime = stStr != null
+        ? DateTime.tryParse(stStr)?.toLocal() ?? DateTime.now()
+        : DateTime.now();
+    final endTime = etStr != null
+        ? DateTime.tryParse(etStr)?.toLocal() ?? startTime
+        : startTime;
+    final date = DateFormat('yyyy-MM-dd').format(startTime);
+
+    int durationMinutes = endTime.difference(startTime).inMinutes;
+    if (ex['activeDuration'] != null) {
+      final durSec =
+          int.tryParse(ex['activeDuration'].toString().replaceAll('s', ''));
+      if (durSec != null && durSec > 0) {
+        durationMinutes = (durSec / 60).round();
+      }
+    }
+    if (durationMinutes <= 0) durationMinutes = 1;
+
+    final name = ex['displayName'] as String? ??
+        ex['exerciseType'] as String? ??
+        'Walk';
+
+    final metrics = ex['metricsSummary'] as Map<String, dynamic>? ?? {};
+    final calories = (metrics['caloriesKcal'] as num?)?.toInt();
+    final distMm = (metrics['distanceMillimeters'] as num?)?.toDouble();
+    final distM = distMm != null ? distMm / 1000.0 : null;
+    final steps = int.tryParse(metrics['steps']?.toString() ?? '');
+    final avgHr =
+        int.tryParse(metrics['averageHeartRateBeatsPerMinute']?.toString() ?? '');
+
+    String? devName;
+    if (json['dataSource'] is Map) {
+      final ds = json['dataSource'] as Map<String, dynamic>;
+      if (ds['device'] is Map) {
+        devName = ds['device']['displayName'] as String?;
+      }
+    }
+
+    final id = (json['name'] as String?)?.split('/').last ??
+        '${startTime.millisecondsSinceEpoch}';
+
+    return GoogleHealthExerciseData(
+      id: id,
+      date: date,
+      startTime: startTime,
+      endTime: endTime,
+      durationMinutes: durationMinutes,
+      activityType: name,
+      calories: calories,
+      distanceMeters: distM,
+      steps: steps,
+      avgHeartRate: avgHr,
+      source: devName ?? 'Fitbit Charge 6',
+    );
+  }
+}
+
 class GoogleHealthRestingHeartRateData {
   const GoogleHealthRestingHeartRateData({
     required this.date,
@@ -1237,7 +1443,8 @@ class GoogleHealthRestingHeartRateData {
 
     return GoogleHealthRestingHeartRateData(
       date: date,
-      bpm: _extractInt(val['bpm'] ??
+      bpm: _extractInt(val['beatsPerMinute'] ??
+          val['bpm'] ??
           val['restingBpm'] ??
           val['averageBpm'] ??
           val['heartRate'] ??
@@ -1331,10 +1538,38 @@ class GoogleHealthSleepData {
       return null;
     }
 
-    int? awakeMin = parseMinutes(val['awakeMinutes'] ?? val['awake'] ?? json['awakeMinutes']);
-    int? lightMin = parseMinutes(val['lightMinutes'] ?? val['light'] ?? json['lightMinutes']);
-    int? deepMin = parseMinutes(val['deepMinutes'] ?? val['deep'] ?? json['deepMinutes']);
-    int? remMin = parseMinutes(val['remMinutes'] ?? val['rem'] ?? json['remMinutes']);
+    final summary = val['summary'] is Map ? val['summary'] as Map : null;
+    int? awakeMin = parseMinutes(summary?['minutesAwake'] ??
+        val['awakeMinutes'] ??
+        val['awake'] ??
+        json['awakeMinutes']);
+    int? lightMin = parseMinutes(
+        val['lightMinutes'] ?? val['light'] ?? json['lightMinutes']);
+    int? deepMin =
+        parseMinutes(val['deepMinutes'] ?? val['deep'] ?? json['deepMinutes']);
+    int? remMin =
+        parseMinutes(val['remMinutes'] ?? val['rem'] ?? json['remMinutes']);
+
+    final stagesSummary = summary?['stagesSummary'] ?? val['stagesSummary'];
+    if (stagesSummary is List) {
+      for (final stg in stagesSummary) {
+        if (stg is Map) {
+          final type = stg['type']?.toString().toUpperCase() ?? '';
+          final min = parseMinutes(stg['minutes'] ?? stg['durationMinutes']);
+          if (min != null && min > 0) {
+            if (type == 'AWAKE') {
+              awakeMin = min;
+            } else if (type == 'LIGHT') {
+              lightMin = min;
+            } else if (type == 'DEEP') {
+              deepMin = min;
+            } else if (type == 'REM') {
+              remMin = min;
+            }
+          }
+        }
+      }
+    }
 
     final rawStages = val['sleepStages'] ??
         val['stages'] ??
@@ -1377,7 +1612,8 @@ class GoogleHealthSleepData {
       if (stageRem > 0) remMin = (remMin ?? 0) + stageRem;
     }
 
-    final netAsleep = parseMinutes(val['asleepDuration'] ??
+    final netAsleep = parseMinutes(summary?['minutesAsleep'] ??
+        val['asleepDuration'] ??
         val['asleepMinutes'] ??
         val['timeAsleep'] ??
         val['netDuration'] ??
@@ -1642,6 +1878,50 @@ class GoogleHealthStepsDataManager
   }
 }
 
+class GoogleHealthDistanceDataManager
+    extends BaseGoogleHealthDataManager<GoogleHealthDistanceData> {
+  GoogleHealthDistanceDataManager({
+    required super.credentials,
+    super.client,
+    super.clientId,
+    super.clientSecret,
+  });
+
+  @override
+  Future<GoogleHealthResult<GoogleHealthDistanceData>> fetch(
+      GoogleHealthAPIURL url) async {
+    final rawItems = await fetchAllPages(url);
+    final items = rawItems
+        .map(GoogleHealthDistanceData.fromJson)
+        .where((e) => e.date.isNotEmpty)
+        .toList();
+
+    return GoogleHealthResult(data: items);
+  }
+}
+
+class GoogleHealthCaloriesDataManager
+    extends BaseGoogleHealthDataManager<GoogleHealthCaloriesData> {
+  GoogleHealthCaloriesDataManager({
+    required super.credentials,
+    super.client,
+    super.clientId,
+    super.clientSecret,
+  });
+
+  @override
+  Future<GoogleHealthResult<GoogleHealthCaloriesData>> fetch(
+      GoogleHealthAPIURL url) async {
+    final rawItems = await fetchAllPages(url);
+    final items = rawItems
+        .map(GoogleHealthCaloriesData.fromJson)
+        .where((e) => e.date.isNotEmpty)
+        .toList();
+
+    return GoogleHealthResult(data: items);
+  }
+}
+
 class GoogleHealthActiveMinutesDataManager
     extends BaseGoogleHealthDataManager<GoogleHealthActiveMinutesData> {
   GoogleHealthActiveMinutesDataManager({
@@ -1723,6 +2003,28 @@ class GoogleHealthHrvDataManager
     final rawItems = await fetchAllPages(url);
     final items = rawItems
         .map(GoogleHealthHrvData.fromJson)
+        .where((e) => e.date.isNotEmpty)
+        .toList();
+
+    return GoogleHealthResult(data: items);
+  }
+}
+
+class GoogleHealthExerciseDataManager
+    extends BaseGoogleHealthDataManager<GoogleHealthExerciseData> {
+  GoogleHealthExerciseDataManager({
+    required super.credentials,
+    super.client,
+    super.clientId,
+    super.clientSecret,
+  });
+
+  @override
+  Future<GoogleHealthResult<GoogleHealthExerciseData>> fetch(
+      GoogleHealthAPIURL url) async {
+    final rawItems = await fetchAllPages(url);
+    final items = rawItems
+        .map(GoogleHealthExerciseData.fromJson)
         .where((e) => e.date.isNotEmpty)
         .toList();
 

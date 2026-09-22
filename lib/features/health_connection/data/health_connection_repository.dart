@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/api_constants.dart';
 import '../../../core/constants/oauth_constants.dart';
 import '../../../core/errors/app_exception.dart';
+import '../../../core/models/exercise_record.dart';
 import '../../../core/models/health_connection.dart';
 import '../../../core/models/health_daily.dart';
 import '../../../core/models/heart_rate_record.dart';
@@ -53,13 +54,13 @@ class HealthConnectionRepository {
       return _firestore
           .collection(FirestorePaths.users)
           .doc(user.uid)
-          .collection(FirestorePaths.connections)
+          .collection(FirestorePaths.apps)
+          .doc(FirestorePaths.appFitbit)
+          .collection(FirestorePaths.connection)
           .doc(FirestorePaths.googleHealthConnectionDoc)
           .snapshots()
-          .map((doc) {
-        if (!doc.exists) return null;
-        return HealthConnection.fromFirestore(doc);
-      });
+          .map((doc) =>
+              doc.exists ? HealthConnection.fromFirestore(doc) : null);
     });
   }
 
@@ -69,7 +70,9 @@ class HealthConnectionRepository {
     final doc = await _firestore
         .collection(FirestorePaths.users)
         .doc(uid)
-        .collection(FirestorePaths.connections)
+        .collection(FirestorePaths.apps)
+        .doc(FirestorePaths.appFitbit)
+        .collection(FirestorePaths.connection)
         .doc(FirestorePaths.googleHealthConnectionDoc)
         .get();
 
@@ -191,6 +194,28 @@ class HealthConnectionRepository {
         if (credentials.userId != null) 'healthUserId': credentials.userId,
       });
 
+    // Primary: users/{uid}/apps/fitbit/connection/google_health
+    await _firestore
+        .collection(FirestorePaths.users)
+        .doc(uid)
+        .collection(FirestorePaths.apps)
+        .doc(FirestorePaths.appFitbit)
+        .collection(FirestorePaths.connection)
+        .doc(FirestorePaths.googleHealthConnectionDoc)
+        .set(connectionData, SetOptions(merge: true));
+
+    // Summary status on apps/fitbit
+    await _firestore
+        .collection(FirestorePaths.users)
+        .doc(uid)
+        .collection(FirestorePaths.apps)
+        .doc(FirestorePaths.appFitbit)
+        .set({
+      'healthConnected': true,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    // Legacy fallback
     await _firestore
         .collection(FirestorePaths.users)
         .doc(uid)
@@ -216,10 +241,12 @@ class HealthConnectionRepository {
       final uid = _uid;
       if (uid != null) {
         try {
-          final doc = await _firestore
+          var doc = await _firestore
               .collection(FirestorePaths.users)
               .doc(uid)
-              .collection(FirestorePaths.connections)
+              .collection(FirestorePaths.apps)
+              .doc(FirestorePaths.appFitbit)
+              .collection(FirestorePaths.connection)
               .doc(FirestorePaths.googleHealthConnectionDoc)
               .get();
 
@@ -273,9 +300,6 @@ class HealthConnectionRepository {
 
     final now = DateTime.now();
     final todayStr = DateFormat('yyyy-MM-dd').format(now);
-    final yesterdayDate = now.subtract(const Duration(days: 1));
-    final yesterdayStr = DateFormat('yyyy-MM-dd').format(yesterdayDate);
-    final todayMidnight = DateTime(now.year, now.month, now.day);
 
     // 1. Retrieve existing Firestore summaries in parallel so we can perform incremental sync
     // and avoid re-fetching or modifying finalized past data.
@@ -293,25 +317,9 @@ class HealthConnectionRepository {
       startDate =
           now.subtract(const Duration(days: AppConstants.initialSyncDays - 1));
     } else {
-      // Find the earliest missing or unfinalized date in recent history
-      DateTime candidate = now;
-      for (int i = 1; i < AppConstants.dashboardChartDays; i++) {
-        final d = now.subtract(Duration(days: i));
-        final dStr = DateFormat('yyyy-MM-dd').format(d);
-        final existing = existingDailies[dStr];
-        final isPastFinalized = existing != null &&
-            (dStr.compareTo(yesterdayStr) < 0 ||
-                (existing.updatedAt != null &&
-                    existing.updatedAt!.isAfter(todayMidnight)) ||
-                ((existing.steps ?? 0) > 0 &&
-                    existing.sleepMinutes != null &&
-                    existing.sleepMinutes! > 0));
-
-        if (!isPastFinalized) {
-          candidate = d;
-        }
-      }
-      startDate = DateTime(candidate.year, candidate.month, candidate.day);
+      // By default, refresh the active recent window (past 7 days + today) so delayed
+      // wearable syncs (steps, sleep, calories from yesterday) are always dynamically updated.
+      startDate = now.subtract(const Duration(days: 7));
     }
 
     final startStr = DateFormat('yyyy-MM-dd').format(startDate);
@@ -435,72 +443,175 @@ class HealthConnectionRepository {
         }(),
 
         // ---------------------------------------------------------------------
-        // B. Activity: Steps (RollUp)
+        // B. Activity: Steps, Distance & Calories (RollUp)
         // ---------------------------------------------------------------------
         () async {
           try {
             final stepsManager =
                 GoogleHealthStepsDataManager(credentials: creds);
-            final stepsResult = await stepsManager.fetch(
-              GoogleHealthStepsAPIURL.dateRange(
-                startDate: startDate,
-                endDate: endDate,
+            final distanceManager =
+                GoogleHealthDistanceDataManager(credentials: creds);
+            final caloriesManager =
+                GoogleHealthCaloriesDataManager(credentials: creds);
+
+            final results = await Future.wait([
+              stepsManager.fetch(
+                GoogleHealthStepsAPIURL.dateRange(
+                  startDate: startDate,
+                  endDate: endDate,
+                ),
               ),
-            );
+              distanceManager.fetch(
+                GoogleHealthDistanceAPIURL.dateRange(
+                  startDate: startDate,
+                  endDate: endDate,
+                ),
+              ),
+              caloriesManager.fetch(
+                GoogleHealthCaloriesAPIURL.dateRange(
+                  startDate: startDate,
+                  endDate: endDate,
+                ),
+              ),
+            ]);
+
+            final stepsResult =
+                results[0] as GoogleHealthResult<GoogleHealthStepsData>;
+            final distResult =
+                results[1] as GoogleHealthResult<GoogleHealthDistanceData>;
+            final calResult =
+                results[2] as GoogleHealthResult<GoogleHealthCaloriesData>;
 
             final Map<String, int> dailyStepsSum = {};
             final Map<String, double> dailyDistSum = {};
             final Map<String, int> dailyCalSum = {};
 
             for (final item in stepsResult.data) {
-              if (item.date.isEmpty) continue;
-              if (isDateFinalized(item.date)) continue;
+              if (item.date.isEmpty || isDateFinalized(item.date)) continue;
               dailyStepsSum[item.date] =
                   (dailyStepsSum[item.date] ?? 0) + item.countSum;
-              if (item.distanceMetersSum != null &&
-                  item.distanceMetersSum! > 0) {
-                dailyDistSum[item.date] =
-                    (dailyDistSum[item.date] ?? 0.0) + item.distanceMetersSum!;
+            }
+
+            for (final item in distResult.data) {
+              if (item.date.isEmpty || isDateFinalized(item.date)) continue;
+              dailyDistSum[item.date] =
+                  (dailyDistSum[item.date] ?? 0.0) + item.meters;
+            }
+
+            for (final item in calResult.data) {
+              if (item.date.isEmpty || isDateFinalized(item.date)) continue;
+              dailyCalSum[item.date] =
+                  (dailyCalSum[item.date] ?? 0) + item.calories;
+            }
+
+            // Real-time live steps resolution for today from raw intraday points:
+            // The Google Health dailyRollUp endpoint updates asynchronously on the cloud.
+            // Raw steps dataPoints provide the exact real-time live step count from Fitbit Charge 6.
+            try {
+              final rawStepsResult = await stepsManager.fetch(
+                GoogleHealthAPIURL.dateRange(
+                  dataType: HealthDataTypes.steps,
+                  startDate: now,
+                  endDate: now,
+                  isRollUp: false,
+                ),
+              );
+              int rawTodaySteps = 0;
+              for (final item in rawStepsResult.data) {
+                if (item.date == todayStr) {
+                  rawTodaySteps += item.countSum;
+                }
               }
-              if (item.caloriesSum != null && item.caloriesSum! > 0) {
-                dailyCalSum[item.date] =
-                    (dailyCalSum[item.date] ?? 0) + item.caloriesSum!;
+              if (rawTodaySteps > (dailyStepsSum[todayStr] ?? 0)) {
+                debugPrint(
+                    '[syncHealthData] 👟 Updating today ($todayStr) steps with live raw count: $rawTodaySteps (was ${dailyStepsSum[todayStr]})');
+                dailyStepsSum[todayStr] = rawTodaySteps;
               }
+            } catch (rawErr) {
+              debugPrint('[syncHealthData] Live raw steps query note: $rawErr');
             }
 
             debugPrint(
                 '[syncHealthData] Steps aggregated: ${dailyStepsSum.length} dates -> $dailyStepsSum');
+            debugPrint(
+                '[syncHealthData] Distance aggregated: ${dailyDistSum.length} dates -> $dailyDistSum');
+            debugPrint(
+                '[syncHealthData] Calories aggregated: ${dailyCalSum.length} dates -> $dailyCalSum');
 
-            for (final entry in dailyStepsSum.entries) {
-              final date = entry.key;
+            final allActivityDates = <String>{
+              ...dailyStepsSum.keys,
+              ...dailyDistSum.keys,
+              ...dailyCalSum.keys,
+            };
+
+            for (final date in allActivityDates) {
               if (isDateFinalized(date)) continue;
-              final stepCount = entry.value;
-              final estDistance =
-                  (dailyDistSum[date] != null && dailyDistSum[date]! >= 10)
-                      ? dailyDistSum[date]!
-                      : (stepCount * 0.762);
-              final isToday = date == todayStr;
-              final bmrRatio = isToday
-                  ? ((now.hour + (now.minute / 60.0)) / 24.0).clamp(0.08, 1.0)
-                  : 1.0;
-              final estBmr = (1400 * bmrRatio).round();
-              final estCalories =
-                  (dailyCalSum[date] != null && dailyCalSum[date]! > 0)
-                      ? dailyCalSum[date]!
-                      : (estBmr + (stepCount * 0.04).round());
+              final stepCount = dailyStepsSum[date] ?? 0;
+              final realDist = dailyDistSum[date] ?? (stepCount * 0.762);
+              final realCal = dailyCalSum[date];
 
               updateBucket(
                 date,
                 (cur) => cur.copyWith(
-                  steps: stepCount,
-                  distanceMeters: estDistance,
-                  calories: estCalories,
+                  steps: stepCount > 0 ? stepCount : cur.steps,
+                  distanceMeters: realDist > 0 ? realDist : cur.distanceMeters,
+                  calories: (realCal != null && realCal > 0)
+                      ? realCal
+                      : cur.calories,
                   source: 'google_health',
                 ),
               );
             }
           } catch (e) {
-            debugPrint('[syncHealthData] Steps sync warning: $e');
+            debugPrint(
+                '[syncHealthData] Steps/Distance/Calories sync warning: $e');
+          }
+        }(),
+
+        // ---------------------------------------------------------------------
+        // B2. Exercise & Workout Sessions (Charge 6 DataPoints)
+        // ---------------------------------------------------------------------
+        () async {
+          try {
+            final exerciseManager =
+                GoogleHealthExerciseDataManager(credentials: creds);
+            final exerciseResult = await exerciseManager.fetch(
+              GoogleHealthAPIURL.dateRange(
+                dataType: HealthDataTypes.exercise,
+                startDate: startDate,
+                endDate: endDate,
+                isRollUp: false,
+              ),
+            );
+
+            final exercisesToPersist = exerciseResult.data.map((item) {
+              return ExerciseRecord(
+                date: item.date,
+                startTime: item.startTime,
+                durationMinutes: item.durationMinutes,
+                activityType: item.activityType,
+                calories: item.calories,
+                distanceMeters: item.distanceMeters,
+                avgHeartRate: item.avgHeartRate,
+                maxHeartRate: item.maxHeartRate,
+                source: item.source ?? 'Fitbit Charge 6',
+              );
+            }).toList();
+
+            if (exercisesToPersist.isNotEmpty) {
+              final newOrMod =
+                  await _healthRepository.batchSaveExerciseRecords(exercisesToPersist);
+              totalRecordsWritten += newOrMod;
+              if (newOrMod > 0) {
+                debugPrint(
+                    '[syncHealthData] 🏃 Synced $newOrMod new/modified workout sessions from Charge 6');
+              } else {
+                debugPrint(
+                    '[syncHealthData] 🏃 All ${exercisesToPersist.length} workout sessions unchanged. Skipping Firestore write.');
+              }
+            }
+          } catch (e) {
+            debugPrint('[syncHealthData] Exercise sync warning: $e');
           }
         }(),
 
@@ -616,11 +727,8 @@ class HealthConnectionRepository {
               final list = entry.value;
               final avgBpm = list.reduce((a, b) => a + b) ~/ list.length;
               updateBucket(date, (cur) {
-                final currentRhr = cur.restingHeartRate;
                 return cur.copyWith(
-                  restingHeartRate: (currentRhr != null && currentRhr > 0)
-                      ? currentRhr
-                      : avgBpm,
+                  restingHeartRate: avgBpm > 0 ? avgBpm : cur.restingHeartRate,
                 );
               });
 
@@ -852,8 +960,8 @@ class HealthConnectionRepository {
         if (isDateFinalized(summary.date)) continue;
 
         final existing = existingDailies[summary.date];
-        if (existing != null && summary.date != todayStr) {
-          // Compare past day metrics: if unchanged, do NOT touch document or updatedAt
+        if (existing != null) {
+          // Compare metrics: if unchanged, do NOT touch document or updatedAt
           final hasChanged = existing.steps != summary.steps ||
               existing.distanceMeters != summary.distanceMeters ||
               existing.calories != summary.calories ||
@@ -866,7 +974,7 @@ class HealthConnectionRepository {
 
           if (!hasChanged) {
             debugPrint(
-                '[syncHealthData] Date ${summary.date} is unchanged. Skipping Firestore write.');
+                '[syncHealthData] Date ${summary.date} is unchanged (${existing.steps} steps). Skipping Firestore write.');
             continue;
           }
         }
@@ -894,7 +1002,9 @@ class HealthConnectionRepository {
         await _firestore
             .collection(FirestorePaths.users)
             .doc(uid)
-            .collection(FirestorePaths.connections)
+            .collection(FirestorePaths.apps)
+            .doc(FirestorePaths.appFitbit)
+            .collection(FirestorePaths.connection)
             .doc(FirestorePaths.googleHealthConnectionDoc)
             .set({
           'lastSyncAt': FieldValue.serverTimestamp(),
@@ -928,7 +1038,9 @@ class HealthConnectionRepository {
         await _firestore
             .collection(FirestorePaths.users)
             .doc(uid)
-            .collection(FirestorePaths.connections)
+            .collection(FirestorePaths.apps)
+            .doc(FirestorePaths.appFitbit)
+            .collection(FirestorePaths.connection)
             .doc(FirestorePaths.googleHealthConnectionDoc)
             .set({
           'status': ConnectionStatus.disconnected.name,
@@ -964,7 +1076,9 @@ class HealthConnectionRepository {
         await _firestore
             .collection(FirestorePaths.users)
             .doc(uid)
-            .collection(FirestorePaths.connections)
+            .collection(FirestorePaths.apps)
+            .doc(FirestorePaths.appFitbit)
+            .collection(FirestorePaths.connection)
             .doc(FirestorePaths.googleHealthConnectionDoc)
             .set({
           'status': ConnectionStatus.disconnected.name,

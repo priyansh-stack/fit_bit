@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
 import '../core/constants/api_constants.dart';
+import '../core/models/exercise_record.dart';
 import '../core/models/health_daily.dart';
 import '../core/models/heart_rate_record.dart';
 import '../core/models/sleep_record.dart';
@@ -37,12 +38,22 @@ class HealthRepository {
       return _firestore
           .collection(FirestorePaths.users)
           .doc(user.uid)
-          .collection(FirestorePaths.healthDaily)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categoryDaily)
+          .collection(FirestorePaths.records)
           .doc(today)
           .snapshots()
-          .map((doc) {
-        if (!doc.exists) return null;
-        return HealthDaily.fromFirestore(doc);
+          .asyncMap((doc) async {
+        if (doc.exists) return HealthDaily.fromFirestore(doc);
+        // Fallback: check legacy healthDaily
+        final legacyDoc = await _firestore
+            .collection(FirestorePaths.users)
+            .doc(user.uid)
+            .collection(FirestorePaths.healthDaily)
+            .doc(today)
+            .get();
+        if (legacyDoc.exists) return HealthDaily.fromFirestore(legacyDoc);
+        return null;
       });
     });
   }
@@ -54,13 +65,15 @@ class HealthRepository {
       return _firestore
           .collection(FirestorePaths.users)
           .doc(user.uid)
-          .collection(FirestorePaths.healthDaily)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categoryDaily)
+          .collection(FirestorePaths.records)
           .orderBy('date', descending: true)
           .limit(days)
           .snapshots()
           .map((snap) {
         final list = snap.docs.map(HealthDaily.fromFirestore).toList();
-        return list.reversed.toList(); // chronological order for charts
+        return list.reversed.toList();
       });
     });
   }
@@ -72,7 +85,9 @@ class HealthRepository {
     await _firestore
         .collection(FirestorePaths.users)
         .doc(uid)
-        .collection(FirestorePaths.healthDaily)
+        .collection(FirestorePaths.sharedHealth)
+        .doc(FirestorePaths.categoryDaily)
+        .collection(FirestorePaths.records)
         .doc(summary.date)
         .set(summary.toJson(), SetOptions(merge: true));
   }
@@ -85,7 +100,9 @@ class HealthRepository {
       final snap = await _firestore
           .collection(FirestorePaths.users)
           .doc(uid)
-          .collection(FirestorePaths.healthDaily)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categoryDaily)
+          .collection(FirestorePaths.records)
           .orderBy('date', descending: true)
           .limit(days)
           .get();
@@ -109,14 +126,123 @@ class HealthRepository {
     if (uid == null || summaries.isEmpty) return;
     final batch = _firestore.batch();
     for (final s in summaries) {
-      final ref = _firestore
+      final primaryRef = _firestore
           .collection(FirestorePaths.users)
           .doc(uid)
-          .collection(FirestorePaths.healthDaily)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categoryDaily)
+          .collection(FirestorePaths.records)
           .doc(s.date);
-      batch.set(ref, s.toJson(), SetOptions(merge: true));
+      batch.set(primaryRef, s.toJson(), SetOptions(merge: true));
     }
     await batch.commit();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 1B. EXERCISE & WORKOUT SESSIONS
+  // ---------------------------------------------------------------------------
+
+  /// Watch recent exercise/workout sessions from shared_health (fallback: legacy exercise).
+  Stream<List<ExerciseRecord>> watchRecentExercises({int limit = 20}) {
+    return _auth.authStateChanges().asyncExpand((user) {
+      if (user == null) return Stream.value(<ExerciseRecord>[]);
+      return _firestore
+          .collection(FirestorePaths.users)
+          .doc(user.uid)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categoryExercise)
+          .collection(FirestorePaths.records)
+          .orderBy('startTime', descending: true)
+          .limit(limit)
+          .snapshots()
+          .asyncMap((snap) async {
+        if (snap.docs.isNotEmpty) {
+          return snap.docs.map(ExerciseRecord.fromFirestore).toList();
+        }
+        final legacySnap = await _firestore
+            .collection(FirestorePaths.users)
+            .doc(user.uid)
+            .collection(FirestorePaths.exercise)
+            .orderBy('startTime', descending: true)
+            .limit(limit)
+            .get();
+        return legacySnap.docs.map(ExerciseRecord.fromFirestore).toList();
+      });
+    });
+  }
+
+  /// Batch save exercise records to both shared_health and legacy collections.
+  /// Only writes records if new or modified compared to existing Firestore documents.
+  Future<int> batchSaveExerciseRecords(List<ExerciseRecord> exercises) async {
+    final uid = _uid;
+    if (uid == null || exercises.isEmpty) return 0;
+
+    final existingSnap = await _firestore
+        .collection(FirestorePaths.users)
+        .doc(uid)
+        .collection(FirestorePaths.sharedHealth)
+        .doc(FirestorePaths.categoryExercise)
+        .collection(FirestorePaths.records)
+        .get();
+
+    final existingMap = <String, Map<String, dynamic>>{};
+    for (final doc in existingSnap.docs) {
+      existingMap[doc.id] = doc.data();
+    }
+
+    final batch = _firestore.batch();
+    int modifiedOrNewCount = 0;
+
+    for (final ex in exercises) {
+      final docId = '${ex.date}_${ex.startTime.millisecondsSinceEpoch}';
+      final existingData = existingMap[docId];
+
+      if (existingData != null) {
+        final exDur = (existingData['durationMinutes'] as num?)?.toInt();
+        final exCal = (existingData['calories'] as num?)?.toInt();
+        final exDist = (existingData['distanceMeters'] as num?)?.toDouble();
+        final exType = existingData['activityType'] as String?;
+
+        if (exDur == ex.durationMinutes &&
+            exCal == ex.calories &&
+            exDist == ex.distanceMeters &&
+            exType == ex.activityType) {
+          // Unchanged: skip writing
+          continue;
+        }
+      }
+
+      final sharedRef = _firestore
+          .collection(FirestorePaths.users)
+          .doc(uid)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categoryExercise)
+          .collection(FirestorePaths.records)
+          .doc(docId);
+      batch.set(sharedRef, ex.toJson(), SetOptions(merge: true));
+
+      final legacyRef = _firestore
+          .collection(FirestorePaths.users)
+          .doc(uid)
+          .collection(FirestorePaths.exercise)
+          .doc(docId);
+      batch.set(legacyRef, ex.toJson(), SetOptions(merge: true));
+
+      modifiedOrNewCount++;
+    }
+
+    if (modifiedOrNewCount > 0) {
+      final categoryDocRef = _firestore
+          .collection(FirestorePaths.users)
+          .doc(uid)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categoryExercise);
+      batch.set(categoryDocRef, {'lastUpdatedAt': FieldValue.serverTimestamp()},
+          SetOptions(merge: true));
+      await batch.commit();
+    }
+
+    return modifiedOrNewCount;
   }
 
   // ---------------------------------------------------------------------------
@@ -129,13 +255,14 @@ class HealthRepository {
       return _firestore
           .collection(FirestorePaths.users)
           .doc(user.uid)
-          .collection(FirestorePaths.heartRate)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categoryHeartRate)
+          .collection(FirestorePaths.records)
           .orderBy('timestamp', descending: true)
           .limit(limit)
           .snapshots()
-          .map((snap) {
-        return snap.docs.map(HeartRateRecord.fromFirestore).toList();
-      });
+          .map((snap) =>
+              snap.docs.map(HeartRateRecord.fromFirestore).toList());
     });
   }
 
@@ -143,12 +270,16 @@ class HealthRepository {
     final uid = _uid;
     if (uid == null) return;
     final docId = record.timestamp.toIso8601String().replaceAll(':', '-');
-    await _firestore
+    final docRef = _firestore
         .collection(FirestorePaths.users)
         .doc(uid)
-        .collection(FirestorePaths.heartRate)
-        .doc(docId)
-        .set(record.toJson(), SetOptions(merge: true));
+        .collection(FirestorePaths.sharedHealth)
+        .doc(FirestorePaths.categoryHeartRate)
+        .collection(FirestorePaths.records)
+        .doc(docId);
+    final existing = await docRef.get();
+    if (existing.exists) return;
+    await docRef.set(record.toJson(), SetOptions(merge: true));
   }
 
   // ---------------------------------------------------------------------------
@@ -161,13 +292,14 @@ class HealthRepository {
       return _firestore
           .collection(FirestorePaths.users)
           .doc(user.uid)
-          .collection(FirestorePaths.sleep)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categorySleep)
+          .collection(FirestorePaths.records)
           .orderBy('date', descending: true)
           .limit(limit)
           .snapshots()
-          .map((snap) {
-        return snap.docs.map(SleepRecord.fromFirestore).toList();
-      });
+          .map((snap) =>
+              snap.docs.map(SleepRecord.fromFirestore).toList());
     });
   }
 
@@ -179,10 +311,13 @@ class HealthRepository {
       final snap = await _firestore
           .collection(FirestorePaths.users)
           .doc(uid)
-          .collection(FirestorePaths.sleep)
+          .collection(FirestorePaths.sharedHealth)
+          .doc(FirestorePaths.categorySleep)
+          .collection(FirestorePaths.records)
           .orderBy('date', descending: true)
           .limit(limit)
           .get();
+
       final result = <String, SleepRecord>{};
       for (final doc in snap.docs) {
         final record = SleepRecord.fromFirestore(doc);
@@ -199,12 +334,27 @@ class HealthRepository {
   Future<void> saveSleepRecord(SleepRecord record) async {
     final uid = _uid;
     if (uid == null) return;
-    await _firestore
+    final docRef = _firestore
         .collection(FirestorePaths.users)
         .doc(uid)
-        .collection(FirestorePaths.sleep)
-        .doc(record.date)
-        .set(record.toJson(), SetOptions(merge: true));
+        .collection(FirestorePaths.sharedHealth)
+        .doc(FirestorePaths.categorySleep)
+        .collection(FirestorePaths.records)
+        .doc(record.date);
+
+    final existingDoc = await docRef.get();
+    if (existingDoc.exists) {
+      final existing = SleepRecord.fromFirestore(existingDoc);
+      final isUnchanged = existing.durationMinutes == record.durationMinutes &&
+          existing.sleepScore == record.sleepScore &&
+          existing.deepMinutes == record.deepMinutes &&
+          existing.remMinutes == record.remMinutes &&
+          existing.lightMinutes == record.lightMinutes &&
+          existing.awakeMinutes == record.awakeMinutes;
+      if (isUnchanged) return;
+    }
+
+    await docRef.set(record.toJson(), SetOptions(merge: true));
   }
 
   // ---------------------------------------------------------------------------
@@ -217,6 +367,8 @@ class HealthRepository {
       return _firestore
           .collection(FirestorePaths.users)
           .doc(user.uid)
+          .collection(FirestorePaths.apps)
+          .doc(FirestorePaths.appFitbit)
           .collection(FirestorePaths.sync)
           .snapshots()
           .map((snap) => snap.docs.map(SyncStatus.fromFirestore).toList());
@@ -232,38 +384,46 @@ class HealthRepository {
   }) async {
     final uid = _uid;
     if (uid == null) return;
-    await _firestore
-        .collection(FirestorePaths.users)
-        .doc(uid)
-        .collection(FirestorePaths.sync)
-        .doc(syncType)
-        .set({
+    final payload = {
       'syncType': syncType,
       'status': status,
       'lastSyncAt': FieldValue.serverTimestamp(),
       if (errorMessage != null) 'errorMessage': errorMessage,
       if (recordsWritten != null) 'recordsWritten': recordsWritten,
       if (lastSuccessfulDate != null) 'lastSuccessfulDate': lastSuccessfulDate,
-    }, SetOptions(merge: true));
+    };
+
+    await _firestore
+        .collection(FirestorePaths.users)
+        .doc(uid)
+        .collection(FirestorePaths.apps)
+        .doc(FirestorePaths.appFitbit)
+        .collection(FirestorePaths.sync)
+        .doc(syncType)
+        .set(payload, SetOptions(merge: true));
   }
 
   /// Purges all cached daily and sleep documents for the current user in Firestore.
   Future<void> clearAllHealthData() async {
     final uid = _uid;
     if (uid == null) return;
-    final healthDailyDocs = await _firestore
+    final dailyDocs = await _firestore
         .collection(FirestorePaths.users)
         .doc(uid)
-        .collection(FirestorePaths.healthDaily)
+        .collection(FirestorePaths.sharedHealth)
+        .doc(FirestorePaths.categoryDaily)
+        .collection(FirestorePaths.records)
         .get();
-    for (final doc in healthDailyDocs.docs) {
+    for (final doc in dailyDocs.docs) {
       await doc.reference.delete();
     }
 
     final sleepDocs = await _firestore
         .collection(FirestorePaths.users)
         .doc(uid)
-        .collection(FirestorePaths.sleep)
+        .collection(FirestorePaths.sharedHealth)
+        .doc(FirestorePaths.categorySleep)
+        .collection(FirestorePaths.records)
         .get();
     for (final doc in sleepDocs.docs) {
       await doc.reference.delete();

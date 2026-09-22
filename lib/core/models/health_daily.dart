@@ -76,8 +76,10 @@ class HealthDaily {
       restingHeartRate: (json['restingHeartRate'] as num?)?.toInt(),
       sleepMinutes: (json['sleepMinutes'] as num?)?.toInt(),
       sleepScore: (json['sleepScore'] as num?)?.toInt(),
-      avgHrv: (json['avgHrv'] as num?)?.toDouble(),
-      avgSpo2: (json['avgSpo2'] as num?)?.toDouble(),
+      avgHrv: (json['avgHrv'] as num?)?.toDouble() ??
+          (json['hrvRmssd'] as num?)?.toDouble(),
+      avgSpo2: (json['avgSpo2'] as num?)?.toDouble() ??
+          (json['spo2Percentage'] as num?)?.toDouble(),
       breathingRate: (json['breathingRate'] as num?)?.toDouble(),
       skinTempDeviation: (json['skinTempDeviation'] as num?)?.toDouble(),
       weight: (json['weight'] as num?)?.toDouble(),
@@ -89,7 +91,13 @@ class HealthDaily {
               ? json['updatedAt'] as DateTime
               : json['updatedAt'] is String
                   ? DateTime.tryParse(json['updatedAt'] as String)
-                  : null,
+                  : json['lastSyncedAt'] is Timestamp
+                      ? (json['lastSyncedAt'] as Timestamp).toDate()
+                      : json['lastSyncedAt'] is DateTime
+                          ? json['lastSyncedAt'] as DateTime
+                          : json['lastSyncedAt'] is String
+                              ? DateTime.tryParse(json['lastSyncedAt'] as String)
+                              : null,
     );
   }
 

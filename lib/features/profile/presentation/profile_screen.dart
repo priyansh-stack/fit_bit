@@ -9,12 +9,15 @@ import '../../../app/routes.dart';
 import '../../../core/models/health_connection.dart';
 import '../../../core/models/user_goals.dart';
 import '../../../core/utils/date_utils.dart';
+import '../../activity/cubit/activity_cubit.dart';
 import '../../auth/bloc/auth_bloc.dart';
 import '../../dashboard/cubit/dashboard_cubit.dart';
 import '../../goals/cubit/goals_cubit.dart';
 import '../../goals/cubit/goals_state.dart';
 import '../../goals/presentation/edit_goals_sheet.dart';
 import '../../health_connection/cubit/health_connection_cubit.dart';
+import '../../heart/cubit/heart_cubit.dart';
+import '../../sleep/cubit/sleep_cubit.dart';
 import '../../../repositories/health_repository.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -29,6 +32,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await context.read<HealthConnectionCubit>().syncHealthData();
     if (mounted) {
       context.read<DashboardCubit>().refresh();
+      context.read<ActivityCubit>().refresh();
+      context.read<SleepCubit>().refresh();
+      context.read<HeartCubit>().refresh();
     }
   }
 

@@ -58,7 +58,9 @@ class App extends StatelessWidget {
             ),
           ),
           BlocProvider<ActivityCubit>(
-            create: (_) => ActivityCubit(),
+            create: (context) => ActivityCubit(
+              healthRepository: context.read<HealthRepository>(),
+            ),
           ),
           BlocProvider<SleepCubit>(
             create: (context) => SleepCubit(

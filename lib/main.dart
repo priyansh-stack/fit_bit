@@ -4,9 +4,11 @@
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 
 import 'app/app.dart';
+import 'core/services/fcm_service.dart';
 import 'firebase_options.dart';
 
 void main() async {
@@ -30,6 +32,10 @@ void main() async {
         persistenceEnabled: true,
         cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
       );
+      
+      // Initialize FCM Background Handler & Service
+      FirebaseMessaging.onBackgroundMessage(fitbitBackgroundMessageHandler);
+      await FitbitFcmService.instance.initialize();
     } catch (_) {}
   }
 
