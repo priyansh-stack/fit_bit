@@ -19,6 +19,9 @@ import '../../health_connection/cubit/health_connection_cubit.dart';
 import '../../heart/cubit/heart_cubit.dart';
 import '../../sleep/cubit/sleep_cubit.dart';
 import '../../../repositories/health_repository.dart';
+import '../../../core/services/fcm_service.dart';
+import '../../../services/weekly_goal_notification_service.dart';
+import '../../../services/weekly_summary_pdf_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -160,6 +163,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           // Daily Goals Configuration
           const _GoalsCard(),
+
+          const SizedBox(height: 20),
+
+          // Notifications & Goal Alerts Configuration
+          const _NotificationsCard(),
 
           const SizedBox(height: 20),
 
@@ -583,4 +591,287 @@ class _LoadingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       const Center(child: CircularProgressIndicator());
+}
+
+class _NotificationsCard extends StatefulWidget {
+  const _NotificationsCard();
+
+  @override
+  State<_NotificationsCard> createState() => _NotificationsCardState();
+}
+
+class _NotificationsCardState extends State<_NotificationsCard> {
+  bool _weeklyGoals = true;
+  bool _dailyMilestones = true;
+  bool _batteryAlerts = true;
+  bool _syncReminders = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.notifications_active_rounded,
+                  color: Color(0xFF10B981),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Notifications & Goal Alerts',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'FCM weekly milestones & tracker status',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white60,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text(
+                  'FCM READY',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF10B981),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Divider(color: Colors.white.withValues(alpha: 0.06), height: 1),
+          const SizedBox(height: 12),
+
+          _buildSwitchTile(
+            title: 'Weekly Goal Celebrations',
+            subtitle: 'Push alert upon reaching 70k steps or 150 active mins',
+            value: _weeklyGoals,
+            activeColor: const Color(0xFF10B981),
+            onChanged: (val) {
+              setState(() => _weeklyGoals = val);
+              FitbitFcmService.instance.updateTopicSubscription('weekly_goals', val);
+            },
+          ),
+          _buildSwitchTile(
+            title: 'Daily Milestones & Progress',
+            subtitle: 'Notifies when daily step target or calorie burn is reached',
+            value: _dailyMilestones,
+            activeColor: const Color(0xFF6C63FF),
+            onChanged: (val) => setState(() => _dailyMilestones = val),
+          ),
+          _buildSwitchTile(
+            title: 'Tracker Battery & Hardware Warnings',
+            subtitle: 'Alerts when wearable battery level drops below 20%',
+            value: _batteryAlerts,
+            activeColor: const Color(0xFFF59E0B),
+            onChanged: (val) {
+              setState(() => _batteryAlerts = val);
+              FitbitFcmService.instance.updateTopicSubscription('device_battery', val);
+            },
+          ),
+          _buildSwitchTile(
+            title: 'Inactivity & Sync Reminders',
+            subtitle: 'Gentle nudges if sync has lapsed for >18 hours',
+            value: _syncReminders,
+            activeColor: const Color(0xFF3B82F6),
+            onChanged: (val) => setState(() => _syncReminders = val),
+          ),
+
+          const SizedBox(height: 14),
+          Divider(color: Colors.white.withValues(alpha: 0.06), height: 1),
+          const SizedBox(height: 14),
+
+          // Test Trigger Buttons
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.emoji_events_rounded, size: 16),
+                  label: const Text('Test Goal Push', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF10B981),
+                    side: BorderSide(color: const Color(0xFF10B981).withValues(alpha: 0.4)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () async {
+                    await WeeklyGoalNotificationService.instance.sendTestWeeklyGoalNotification();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Weekly goal celebration push dispatched!')),
+                      );
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.assessment_rounded, size: 16),
+                  label: const Text('Weekly Digest', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF6C63FF),
+                    side: BorderSide(color: const Color(0xFF6C63FF).withValues(alpha: 0.4)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () async {
+                    await WeeklyGoalNotificationService.instance.sendTestWeeklySummaryNotification();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Weekly health summary push dispatched!')),
+                      );
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.battery_alert_rounded, size: 16),
+              label: const Text('Test Battery Alert (15%)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFF59E0B),
+                side: BorderSide(color: const Color(0xFFF59E0B).withValues(alpha: 0.4)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () async {
+                await FitbitFcmService.instance.showLowBatteryAlert(batteryPercent: 15);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Low battery warning push dispatched!')),
+                  );
+                }
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+              label: const Text('Download Weekly Health Summary (PDF)',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0284C7),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () async {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Generating Weekly Health Summary PDF...'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+                try {
+                  final file = await WeeklySummaryPdfService.instance
+                      .generateAndDownloadWeeklySummary();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('PDF Downloaded to ${file.path.split("/").last}'),
+                        backgroundColor: const Color(0xFF10B981),
+                        action: SnackBarAction(
+                          label: 'OPEN',
+                          textColor: Colors.white,
+                          onPressed: () =>
+                              WeeklySummaryPdfService.instance.openPdf(file.path),
+                        ),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('PDF generation failed: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSwitchTile({
+    required String title,
+    required String subtitle,
+    required bool value,
+    required Color activeColor,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Colors.white60, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            activeThumbColor: activeColor,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
 }

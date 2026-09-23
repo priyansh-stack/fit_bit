@@ -1,7 +1,6 @@
-// lib/features/dashboard/presentation/widgets/weekly_trend_card.dart
-
 import 'package:flutter/material.dart';
 import '../../../../core/models/weekly_trend.dart';
+import '../../../../services/weekly_summary_pdf_service.dart';
 
 class WeeklyTrendCard extends StatelessWidget {
   const WeeklyTrendCard({
@@ -156,6 +155,65 @@ class WeeklyTrendCard extends StatelessWidget {
               ),
             ),
           ],
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0284C7),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 0,
+              ),
+              onPressed: () async {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Generating Weekly Health Summary PDF...'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+                try {
+                  final file = await WeeklySummaryPdfService.instance
+                      .generateAndDownloadWeeklySummary(trend: trend);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Downloaded: ${file.path.split("/").last}'),
+                        backgroundColor: const Color(0xFF10B981),
+                        action: SnackBarAction(
+                          label: 'OPEN',
+                          textColor: Colors.white,
+                          onPressed: () =>
+                              WeeklySummaryPdfService.instance.openPdf(file.path),
+                        ),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('PDF generation failed: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              },
+              icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+              label: const Text(
+                'Download Weekly Health Summary (PDF)',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
