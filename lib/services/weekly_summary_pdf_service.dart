@@ -7,6 +7,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../core/models/weekly_trend.dart';
 import '../core/services/fcm_service.dart';
+import '../core/utils/weekly_comparison.dart';
+import '../repositories/health_repository.dart';
 
 class WeeklySummaryPdfService {
   WeeklySummaryPdfService._internal();
@@ -23,6 +25,7 @@ class WeeklySummaryPdfService {
     String dob = '17-Sep-2004',
     int age = 22,
     List<Map<String, dynamic>>? dailyRecords,
+    HealthRepository? healthRepo,
   }) async {
     final pdfBytes = await generateWeeklySummaryPdf(
       trend: trend,
@@ -31,6 +34,7 @@ class WeeklySummaryPdfService {
       dob: dob,
       age: age,
       dailyRecords: dailyRecords,
+      healthRepo: healthRepo,
     );
 
     final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
@@ -50,6 +54,7 @@ class WeeklySummaryPdfService {
     String dob = '17-Sep-2004',
     int age = 22,
     List<Map<String, dynamic>>? dailyRecords,
+    HealthRepository? healthRepo,
   }) async {
     final pdf = pw.Document();
     final now = DateTime.now();
@@ -57,39 +62,98 @@ class WeeklySummaryPdfService {
     final weekRange =
         '${DateFormat('MMM dd').format(now.subtract(const Duration(days: 6)))} - ${DateFormat('MMM dd, yyyy').format(now)}';
 
-    final t = trend ??
-        const WeeklyTrend(
-          stepDeltaPercent: 3.5,
-          avgStepsThisWeek: 10350,
-          avgStepsLastWeek: 10000,
-          activeMinDelta: 35,
-          totalActiveMinThisWeek: 185,
-          restingHrDelta: -1,
-          avgRestingHrThisWeek: 58,
-          sleepMinutesDelta: 25,
-          avgSleepHoursThisWeek: 7.8,
-          coachingInsights: [
-            'Outstanding cardiovascular endurance: Resting HR maintained at an optimal 58 bpm.',
-            'Step target achieved 6 out of 7 days, maintaining great metabolic activation.',
-            'Sleep consistency improved by +25 min/night, enhancing muscular and cognitive recovery.',
-          ],
-        );
+    WeeklyTrend? effectiveTrend = trend;
+    List<Map<String, dynamic>>? records = dailyRecords;
 
-    final totalSteps = t.avgStepsThisWeek * 7;
+    // Dynamically query real telemetry from Firestore when trend or records are not supplied
+    if (effectiveTrend == null || records == null) {
+      try {
+        final repo = healthRepo ?? HealthRepository();
+        final recentSummaries = await repo.getRecentDailySummaries(days: 14);
+        final sortedDays = recentSummaries.values.toList()
+          ..sort((a, b) => a.date.compareTo(b.date));
 
-    // Build default 7-day breakdown if none supplied
-    final records = dailyRecords ??
+        if (sortedDays.isNotEmpty) {
+          effectiveTrend ??= WeeklyComparison.compare(days: sortedDays);
+
+          records ??= List.generate(7, (i) {
+            final d = now.subtract(Duration(days: 6 - i));
+            final dateIso = DateFormat('yyyy-MM-dd').format(d);
+            final item = recentSummaries[dateIso];
+            final stepsVal = (item?.steps != null && item!.steps! > 0)
+                ? item.steps.toString()
+                : '0';
+            final activeVal =
+                (item?.activeMinutes != null && item!.activeMinutes! > 0)
+                    ? item.activeMinutes.toString()
+                    : '0';
+            final rhrVal =
+                (item?.restingHeartRate != null && item!.restingHeartRate! > 0)
+                    ? '${item.restingHeartRate} bpm'
+                    : '--';
+            final sleepVal =
+                (item?.sleepMinutes != null && item!.sleepMinutes! > 0)
+                    ? '${(item.sleepMinutes! / 60.0).toStringAsFixed(1)}h'
+                    : '--';
+            final calVal = (item?.calories != null && item!.calories! > 0)
+                ? '${item.calories} kcal'
+                : '--';
+
+            return {
+              'date': DateFormat('EEE, MMM dd').format(d),
+              'steps': stepsVal,
+              'activeMin': activeVal,
+              'restingHr': rhrVal,
+              'sleep': sleepVal,
+              'calories': calVal,
+            };
+          });
+        }
+      } catch (e) {
+        debugPrint('[WeeklySummaryPdfService] Telemetry fetch notice: $e');
+      }
+    }
+
+    // Default clean 7-day breakdown if none could be loaded
+    final activeRecords = records ??
         List.generate(7, (i) {
           final d = now.subtract(Duration(days: 6 - i));
           return {
             'date': DateFormat('EEE, MMM dd').format(d),
-            'steps': (9500 + (i * 280) % 1500).toString(),
-            'activeMin': (25 + (i * 5) % 20).toString(),
-            'restingHr': '${57 + (i % 3)} bpm',
-            'sleep': '${(7.2 + (i * 0.2) % 1.2).toStringAsFixed(1)}h',
-            'calories': '${2200 + (i * 70) % 350} kcal',
+            'steps': '0',
+            'activeMin': '0',
+            'restingHr': '--',
+            'sleep': '--',
+            'calories': '--',
           };
         });
+
+    // Derive actual total and daily average directly from the real 7-day record table
+    final totalSteps = activeRecords.fold<int>(
+      0,
+      (sum, r) => sum + (int.tryParse(r['steps']?.toString() ?? '0') ?? 0),
+    );
+    final activeStepDays = activeRecords
+        .where((r) => (int.tryParse(r['steps']?.toString() ?? '0') ?? 0) > 0)
+        .length;
+    final calculatedAvgSteps =
+        activeStepDays > 0 ? (totalSteps ~/ activeStepDays) : (totalSteps ~/ 7);
+
+    final t = effectiveTrend ??
+        WeeklyTrend(
+          stepDeltaPercent: 0.0,
+          avgStepsThisWeek: calculatedAvgSteps,
+          avgStepsLastWeek: 0,
+          activeMinDelta: 0,
+          totalActiveMinThisWeek: 0,
+          restingHrDelta: 0,
+          avgRestingHrThisWeek: null,
+          sleepMinutesDelta: 0,
+          avgSleepHoursThisWeek: 0.0,
+          coachingInsights: const [
+            'Wearable telemetry synchronized. Maintain daily activity to build cardiovascular endurance.',
+          ],
+        );
 
     pdf.addPage(
       pw.MultiPage(
@@ -233,7 +297,7 @@ class WeeklySummaryPdfService {
             pw.SizedBox(height: 8),
             pw.TableHelper.fromTextArray(
               headers: ['Day / Date', 'Steps', 'Active Min', 'Resting HR', 'Sleep', 'Est. Burn'],
-              data: records.map((r) => [
+              data: activeRecords.map((r) => [
                 r['date'] ?? '',
                 r['steps'] ?? '',
                 '${r['activeMin']} min',
@@ -284,10 +348,15 @@ class WeeklySummaryPdfService {
                       child: pw.Row(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
-                          pw.Text('• ',
-                              style: pw.TextStyle(
-                                  color: PdfColor.fromHex('#16A34A'),
-                                  fontWeight: pw.FontWeight.bold)),
+                          pw.Container(
+                            margin: const pw.EdgeInsets.only(top: 3.5, right: 6),
+                            width: 3.5,
+                            height: 3.5,
+                            decoration: const pw.BoxDecoration(
+                              shape: pw.BoxShape.circle,
+                              color: PdfColors.green700,
+                            ),
+                          ),
                           pw.Expanded(
                             child: pw.Text(
                               insight,
@@ -310,7 +379,7 @@ class WeeklySummaryPdfService {
             pw.Divider(color: PdfColors.grey300),
             pw.SizedBox(height: 4),
             pw.Text(
-              'Confidential Health Record — For personal health tracking & wellness monitoring only. '
+              'Confidential Health Record - For personal health tracking & wellness monitoring only. '
               'Not a replacement for professional clinical diagnosis. Generated by Fitbit Health Dashboard on $dateStr.',
               style: pw.TextStyle(
                 fontSize: 7.5,

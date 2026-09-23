@@ -488,47 +488,18 @@ class HealthConnectionRepository {
 
             for (final item in stepsResult.data) {
               if (item.date.isEmpty || isDateFinalized(item.date)) continue;
-              dailyStepsSum[item.date] =
-                  (dailyStepsSum[item.date] ?? 0) + item.countSum;
+              // Google Health dailyRollUp provides the canonical, deduplicated total for each day
+              dailyStepsSum[item.date] = item.countSum;
             }
 
             for (final item in distResult.data) {
               if (item.date.isEmpty || isDateFinalized(item.date)) continue;
-              dailyDistSum[item.date] =
-                  (dailyDistSum[item.date] ?? 0.0) + item.meters;
+              dailyDistSum[item.date] = item.meters;
             }
 
             for (final item in calResult.data) {
               if (item.date.isEmpty || isDateFinalized(item.date)) continue;
-              dailyCalSum[item.date] =
-                  (dailyCalSum[item.date] ?? 0) + item.calories;
-            }
-
-            // Real-time live steps resolution for today from raw intraday points:
-            // The Google Health dailyRollUp endpoint updates asynchronously on the cloud.
-            // Raw steps dataPoints provide the exact real-time live step count from Fitbit Charge 6.
-            try {
-              final rawStepsResult = await stepsManager.fetch(
-                GoogleHealthAPIURL.dateRange(
-                  dataType: HealthDataTypes.steps,
-                  startDate: now,
-                  endDate: now,
-                  isRollUp: false,
-                ),
-              );
-              int rawTodaySteps = 0;
-              for (final item in rawStepsResult.data) {
-                if (item.date == todayStr) {
-                  rawTodaySteps += item.countSum;
-                }
-              }
-              if (rawTodaySteps > (dailyStepsSum[todayStr] ?? 0)) {
-                debugPrint(
-                    '[syncHealthData] 👟 Updating today ($todayStr) steps with live raw count: $rawTodaySteps (was ${dailyStepsSum[todayStr]})');
-                dailyStepsSum[todayStr] = rawTodaySteps;
-              }
-            } catch (rawErr) {
-              debugPrint('[syncHealthData] Live raw steps query note: $rawErr');
+              dailyCalSum[item.date] = item.calories;
             }
 
             debugPrint(
