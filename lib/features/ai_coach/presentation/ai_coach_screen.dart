@@ -81,6 +81,7 @@ class _AiCoachViewState extends State<_AiCoachView> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
         elevation: 0,
+        titleSpacing: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
           onPressed: () => Navigator.of(context).pop(),
