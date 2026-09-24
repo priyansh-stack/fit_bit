@@ -89,9 +89,19 @@ class ReadinessCalculator {
     HealthDaily today,
     List<HealthDaily> recentDays,
   ) {
-    final todayRhr = today.restingHeartRate;
+    // Look at today's RHR, or if not yet finalized for today, the most recent recorded night/day
+    int? effectiveRhr = (today.restingHeartRate != null && today.restingHeartRate! > 0)
+        ? today.restingHeartRate
+        : recentDays.reversed
+            .where((d) => d.restingHeartRate != null && d.restingHeartRate! > 0)
+            .map((d) => d.restingHeartRate!)
+            .firstOrNull;
 
-    // Calculate 14-day baseline excluding today
+    if (effectiveRhr == null || effectiveRhr == 0) {
+      return 80.0; // Default when no wearable RHR has been recorded yet
+    }
+
+    // Calculate baseline excluding the effective reading date
     final baselineDays = recentDays
         .where((d) =>
             d.date != today.date &&
@@ -99,8 +109,13 @@ class ReadinessCalculator {
             d.restingHeartRate! > 0)
         .toList();
 
-    if (todayRhr == null || todayRhr == 0 || baselineDays.isEmpty) {
-      return 80.0; // Default when baseline or today's RHR is unavailable
+    if (baselineDays.isEmpty) {
+      // Direct absolute evaluation against physiological healthy norms
+      if (effectiveRhr <= 58) return 98.0; // Athletic/optimal
+      if (effectiveRhr <= 65) return 92.0; // Excellent
+      if (effectiveRhr <= 72) return 86.0; // Good
+      if (effectiveRhr <= 80) return 76.0; // Fair
+      return 62.0; // Elevated
     }
 
     final baselineAvg = baselineDays
@@ -108,18 +123,18 @@ class ReadinessCalculator {
             .reduce((a, b) => a + b) /
         baselineDays.length;
 
-    final delta = todayRhr - baselineAvg;
+    final delta = effectiveRhr - baselineAvg;
 
     if (delta <= -2.0) {
       return 100.0; // RHR is well below baseline (exceptional cardiovascular recovery)
     } else if (delta <= 1.0) {
-      return 90.0; // RHR is stable at baseline
+      return 92.0; // RHR is stable at baseline
     } else if (delta <= 3.0) {
-      return 75.0; // Slightly elevated
+      return 82.0; // Slightly elevated
     } else if (delta <= 6.0) {
-      return 60.0; // Moderately elevated
+      return 68.0; // Moderately elevated
     } else {
-      return (60.0 - (delta - 6.0) * 5.0).clamp(25.0, 60.0); // High elevation
+      return (65.0 - (delta - 6.0) * 5.0).clamp(25.0, 65.0); // High elevation
     }
   }
 
@@ -139,13 +154,13 @@ class ReadinessCalculator {
     final stepRatio = ySteps / goals.stepGoal;
 
     if (stepRatio > 1.6) {
-      return 65.0; // High exertion yesterday requires muscular rest
+      return 65.0; // Heavy exertion yesterday requires physical recovery
     } else if (stepRatio >= 0.8) {
-      return 92.0; // Balanced optimal exertion
+      return 94.0; // Balanced optimal exertion
     } else if (stepRatio >= 0.4) {
-      return 82.0;
+      return 88.0; // Moderate activity
     } else {
-      return 75.0; // Sedentary day
+      return 85.0; // Light active rest day (well-rested muscles)
     }
   }
 

@@ -12,6 +12,7 @@ import '../features/activity/presentation/activity_screen.dart';
 import '../features/sleep/presentation/sleep_screen.dart';
 import '../features/heart/presentation/heart_screen.dart';
 import '../features/profile/presentation/profile_screen.dart';
+import '../features/ai_coach/presentation/ai_coach_screen.dart';
 import '../shared/widgets/main_shell.dart';
 
 // Route names
@@ -23,6 +24,7 @@ class AppRoute {
   static const String sleep = '/sleep';
   static const String heart = '/heart';
   static const String profile = '/profile';
+  static const String aiCoach = '/ai-coach';
 }
 
 /// Helper to convert a Stream into a Listenable for GoRouter.
@@ -82,6 +84,10 @@ GoRouter createAppRouter(AuthBloc authBloc) {
       GoRoute(
         path: AppRoute.connect,
         builder: (context, state) => const ConnectScreen(),
+      ),
+      GoRoute(
+        path: AppRoute.aiCoach,
+        builder: (context, state) => const AiCoachScreen(),
       ),
       GoRoute(
         path: '/oauth2redirect',

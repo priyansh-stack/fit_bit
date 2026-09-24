@@ -93,6 +93,11 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 actions: [
                   IconButton(
+                    icon: const Icon(Icons.auto_awesome, color: Color(0xFF38BDF8)),
+                    tooltip: 'Fitbit AI Coach',
+                    onPressed: () => context.push(AppRoute.aiCoach),
+                  ),
+                  IconButton(
                     icon: const Icon(Icons.sync_rounded, color: Colors.white70),
                     tooltip: 'Sync Health Data',
                     onPressed: () async {
@@ -243,6 +248,17 @@ class DashboardScreen extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push(AppRoute.aiCoach),
+        backgroundColor: const Color(0xFF0284C7),
+        foregroundColor: Colors.white,
+        elevation: 6,
+        icon: const Icon(Icons.auto_awesome, size: 18),
+        label: const Text(
+          'AI Coach',
+          style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.3),
         ),
       ),
     );

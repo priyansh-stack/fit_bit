@@ -16,7 +16,7 @@ void main() {
         {'date': 'Wed, Sep 23', 'steps': '6139', 'activeMin': '111', 'restingHr': '66 bpm', 'sleep': '7.6h', 'calories': '2000 kcal'},
       ];
 
-      final trend = WeeklyTrend(
+      const trend = WeeklyTrend(
         stepDeltaPercent: 12.5,
         avgStepsThisWeek: 3821,
         avgStepsLastWeek: 3400,
@@ -26,7 +26,7 @@ void main() {
         avgRestingHrThisWeek: 67,
         sleepMinutesDelta: 20,
         avgSleepHoursThisWeek: 7.2,
-        coachingInsights: const [
+        coachingInsights: [
           'Excellent activity on Sep 23 reaching 6,139 steps!',
         ],
       );
