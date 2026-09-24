@@ -7,6 +7,7 @@ import '../../../repositories/health_repository.dart';
 import '../cubit/ai_coach_cubit.dart';
 import '../data/gemini_chat_service.dart';
 import 'widgets/ai_key_dialog.dart';
+import 'widgets/ai_chat_library_sheet.dart';
 
 class AiCoachScreen extends StatelessWidget {
   const AiCoachScreen({super.key});
@@ -131,10 +132,66 @@ class _AiCoachViewState extends State<_AiCoachView> {
         actions: [
           BlocBuilder<AiCoachCubit, AiCoachState>(
             builder: (context, state) {
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(Icons.forum_outlined, color: Colors.white70, size: 20),
+                    tooltip: 'Coaching Library',
+                    onPressed: () {
+                      AiChatLibrarySheet.show(
+                        context,
+                        context.read<AiCoachCubit>(),
+                        state,
+                      );
+                    },
+                  ),
+                  if (state.sessions.isNotEmpty)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF00D2C4),
+                          shape: BoxShape.circle,
+                        ),
+                        constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
+                        child: Text(
+                          '${state.sessions.length > 9 ? '9+' : state.sessions.length}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          IconButton(
+            padding: const EdgeInsets.all(4),
+            constraints: const BoxConstraints(),
+            icon: const Icon(Icons.add_comment_outlined, color: Colors.white70, size: 19),
+            tooltip: 'New Chat',
+            onPressed: () => context.read<AiCoachCubit>().startNewChat(),
+          ),
+          BlocBuilder<AiCoachCubit, AiCoachState>(
+            builder: (context, state) {
               return TextButton(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
                 onPressed: () => context.read<AiCoachCubit>().toggleModel(),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                   decoration: BoxDecoration(
                     color: state.isProModel
                         ? const Color(0xFF8B5CF6).withValues(alpha: 0.25)
@@ -157,15 +214,13 @@ class _AiCoachViewState extends State<_AiCoachView> {
             },
           ),
           IconButton(
+            padding: const EdgeInsets.all(4),
+            constraints: const BoxConstraints(),
             icon: const Icon(Icons.vpn_key_outlined, color: Colors.white70, size: 20),
             tooltip: 'Gemini API Key',
             onPressed: _openKeyDialog,
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: Colors.white70, size: 20),
-            tooltip: 'Clear Chat',
-            onPressed: () => context.read<AiCoachCubit>().clearConversation(),
-          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: BlocConsumer<AiCoachCubit, AiCoachState>(

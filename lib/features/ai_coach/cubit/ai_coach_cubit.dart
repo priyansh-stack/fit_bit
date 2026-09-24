@@ -1,5 +1,6 @@
 // lib/features/ai_coach/cubit/ai_coach_cubit.dart
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
@@ -8,6 +9,7 @@ import '../../../core/utils/date_utils.dart';
 import '../../../core/utils/weekly_comparison.dart';
 import '../../../repositories/health_repository.dart';
 import '../data/gemini_chat_service.dart';
+import '../data/fitbit_chat_library_repository.dart';
 import 'ai_coach_state.dart';
 
 export 'ai_coach_state.dart';
@@ -16,22 +18,32 @@ class AiCoachCubit extends Cubit<AiCoachState> {
   AiCoachCubit({
     required HealthRepository healthRepository,
     GeminiChatService? chatService,
+    FitbitChatLibraryRepository? libraryRepository,
   })  : _healthRepository = healthRepository,
         _chatService = chatService ?? GeminiChatService(),
+        _libraryRepository = libraryRepository ?? FitbitChatLibraryRepository(),
         super(const AiCoachState()) {
     _init();
   }
 
   final HealthRepository _healthRepository;
   final GeminiChatService _chatService;
+  final FitbitChatLibraryRepository _libraryRepository;
 
   Future<void> _init() async {
     final key = await _chatService.getApiKey();
     final hasKey = key != null && key.isNotEmpty;
+    final dynamicName = _resolveDynamicUserName();
+    final newSessionId = 'session_${DateTime.now().millisecondsSinceEpoch}';
 
-    // Initial greeting
+    // Fetch user's existing sessions
+    List<AiCoachSession> sessions = [];
+    try {
+      sessions = await _libraryRepository.fetchSessions();
+    } catch (_) {}
+
     final welcomeMessage = ChatMessage(
-      text: "👋 Hi Priyanshu! I'm your **Fitbit AI Health Coach** powered by Google Gemini. "
+      text: "👋 Hi $dynamicName! I'm your **Fitbit AI Health Coach** powered by Google Gemini. "
           "I have live access to your wearable biometrics, recovery metrics, and step trends. "
           "How can I assist your health and fitness today?",
       isUser: false,
@@ -40,8 +52,25 @@ class AiCoachCubit extends Cubit<AiCoachState> {
 
     emit(state.copyWith(
       hasApiKey: hasKey,
+      currentUserName: dynamicName,
+      currentSessionId: newSessionId,
+      sessions: sessions,
       messages: [welcomeMessage],
     ));
+  }
+
+  String _resolveDynamicUserName() {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user?.displayName != null && user!.displayName!.trim().isNotEmpty) {
+        return user.displayName!.trim();
+      }
+      if (user?.email != null && user!.email!.contains('@')) {
+        final handle = user.email!.split('@').first.trim();
+        if (handle.isNotEmpty) return handle;
+      }
+    } catch (_) {}
+    return 'Athlete';
   }
 
   Future<void> saveApiKey(String key) async {
@@ -57,13 +86,60 @@ class AiCoachCubit extends Cubit<AiCoachState> {
     emit(state.copyWith(isProModel: !state.isProModel));
   }
 
-  void clearConversation() {
+  /// Starts a fresh, new chat session
+  Future<void> startNewChat() async {
+    final dynamicName = _resolveDynamicUserName();
+    final newSessionId = 'session_${DateTime.now().millisecondsSinceEpoch}';
+
     final welcomeMessage = ChatMessage(
-      text: "Conversation cleared. How can I help you next with your fitness and recovery goals?",
+      text: "👋 Hi $dynamicName! I'm your **Fitbit AI Health Coach** powered by Google Gemini. "
+          "How can I assist your health and fitness today?",
       isUser: false,
       timestamp: DateTime.now(),
     );
-    emit(state.copyWith(messages: [welcomeMessage]));
+
+    emit(state.copyWith(
+      status: AiCoachStatus.initial,
+      currentSessionId: newSessionId,
+      messages: [welcomeMessage],
+    ));
+  }
+
+  void clearConversation() {
+    startNewChat();
+  }
+
+  /// Loads an existing conversation session from the library
+  void loadSession(AiCoachSession session) {
+    emit(state.copyWith(
+      status: AiCoachStatus.success,
+      currentSessionId: session.id,
+      messages: session.messages,
+    ));
+  }
+
+  /// Deletes a session from the user's private library
+  Future<void> deleteSession(String sessionId) async {
+    await _libraryRepository.deleteSession(sessionId);
+    final updated = List<AiCoachSession>.from(state.sessions)
+      ..removeWhere((s) => s.id == sessionId);
+
+    if (state.currentSessionId == sessionId) {
+      await startNewChat();
+      emit(state.copyWith(sessions: updated));
+    } else {
+      emit(state.copyWith(sessions: updated));
+    }
+  }
+
+  Future<void> reloadLibrary() async {
+    emit(state.copyWith(isLoadingLibrary: true));
+    try {
+      final sessions = await _libraryRepository.fetchSessions();
+      emit(state.copyWith(sessions: sessions, isLoadingLibrary: false));
+    } catch (_) {
+      emit(state.copyWith(isLoadingLibrary: false));
+    }
   }
 
   Future<void> sendMessage(String text) async {
@@ -107,10 +183,15 @@ class AiCoachCubit extends Cubit<AiCoachState> {
         timestamp: DateTime.now(),
       );
 
+      final finalMessages = List<ChatMessage>.from(updatedMessages)..add(aiMessage);
+
       emit(state.copyWith(
         status: AiCoachStatus.success,
-        messages: List<ChatMessage>.from(state.messages)..add(aiMessage),
+        messages: finalMessages,
       ));
+
+      // Persist to user's private Firestore chat library
+      await _persistSession(userPrompt, reply, finalMessages);
     } catch (e) {
       debugPrint('[AiCoachCubit] sendMessage error: $e');
       final errMessage = e.toString().replaceFirst('Exception: ', '');
@@ -121,8 +202,31 @@ class AiCoachCubit extends Cubit<AiCoachState> {
     }
   }
 
+  Future<void> _persistSession(String userPrompt, String botReply, List<ChatMessage> messages) async {
+    try {
+      final sessionId = state.currentSessionId ?? 'session_${DateTime.now().millisecondsSinceEpoch}';
+      final title = userPrompt.length > 32 ? '${userPrompt.substring(0, 32)}...' : userPrompt;
+
+      final session = AiCoachSession(
+        id: sessionId,
+        title: title,
+        lastMessagePreview: botReply.length > 60 ? '${botReply.substring(0, 60)}...' : botReply,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        messages: messages,
+      );
+
+      await _libraryRepository.saveSession(session);
+      final updatedSessions = await _libraryRepository.fetchSessions();
+      emit(state.copyWith(sessions: updatedSessions, currentSessionId: sessionId));
+    } catch (e) {
+      debugPrint('[AiCoachCubit] Error saving session to library: $e');
+    }
+  }
+
   String _buildSystemInstruction(HealthDaily? today, List<HealthDaily> recentDays) {
     final weeklyTrend = WeeklyComparison.compare(days: recentDays);
+    final dynamicName = _resolveDynamicUserName();
 
     final todaySteps = today?.steps ?? 0;
     final todayCalories = today?.calories ?? 0;
@@ -147,7 +251,7 @@ class AiCoachCubit extends Cubit<AiCoachState> {
     sb.writeln("Keep responses concise, motivating, and actionable. Do not output excessively verbose disclaimers unless relevant.");
     sb.writeln();
     sb.writeln("CURRENT USER GROUND TRUTH TELEMETRY:");
-    sb.writeln("- User: Priyanshu Kumar (Age: 22, Male Vitality Cohort)");
+    sb.writeln("- Athlete / User: $dynamicName");
     sb.writeln("- Today's Date: ${DateFormat('EEEE, MMMM d, yyyy').format(DateTime.now())}");
     sb.writeln("- Today's Steps: $todaySteps steps (Canonical Google Health Daily Rollup)");
     sb.writeln("- Today's Active Zone Minutes: $todayActiveMin minutes");
@@ -162,3 +266,4 @@ class AiCoachCubit extends Cubit<AiCoachState> {
     return sb.toString();
   }
 }
+

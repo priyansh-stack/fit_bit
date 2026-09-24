@@ -101,3 +101,84 @@ export const syncHistoricalHealthData = functions
       throw new functions.https.HttpsError("internal", "Historical sync failed.");
     }
   });
+
+// ─── AI Health Coach / Copilot Proxy ─────────────────────────────────────────
+
+import { processHealthAiChat, ChatRequestPayload } from "./ai/health_ai_service";
+
+/**
+ * chatWithHealthAi (Callable)
+ * Secure server-side Gemini AI proxy for Flutter clients with Firebase Auth.
+ */
+export const chatWithHealthAi = functions
+  .runWith({ timeoutSeconds: 60, memory: "512MB" })
+  .https.onCall(async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "You must be signed in to consult the AI health coach."
+      );
+    }
+
+    const uid = request.auth.uid;
+    const data = request.data as ChatRequestPayload;
+
+    if (!data || !data.prompt) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A valid prompt is required."
+      );
+    }
+
+    functions.logger.info("chatWithHealthAi called", { uid });
+    return await processHealthAiChat(uid, data);
+  });
+
+/**
+ * chatWithHealthAiHttp (HTTPS REST)
+ * Direct REST endpoint for authenticated clients via Authorization: Bearer <idToken>
+ */
+export const chatWithHealthAiHttp = functions
+  .runWith({ timeoutSeconds: 60, memory: "512MB" })
+  .https.onRequest(async (req, res) => {
+    // CORS headers
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method Not Allowed" });
+      return;
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing or invalid Authorization header" });
+      return;
+    }
+
+    const idToken = authHeader.split("Bearer ")[1];
+    try {
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      const uid = decodedToken.uid;
+      const data = req.body as ChatRequestPayload;
+
+      if (!data || !data.prompt) {
+        res.status(400).json({ error: "Missing prompt in request body" });
+        return;
+      }
+
+      const result = await processHealthAiChat(uid, data);
+      res.status(200).json(result);
+    } catch (err: unknown) {
+      functions.logger.error("chatWithHealthAiHttp error", { err });
+      const message = (err as Error).message || "Internal error";
+      res.status(500).json({ error: message });
+    }
+  });
+
