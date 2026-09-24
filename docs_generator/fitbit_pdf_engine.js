@@ -130,17 +130,18 @@ class FitbitPDFEngine {
       ['TARGET AUDIENCE', targetAudience],
       ['TARGET OPERATING SYSTEMS', 'Android OS (API 24 Nougat - API 34 Android 14+), Flutter Engine'],
       ['SYSTEM VERSION', version],
+      ['AI REASONING ENGINE', 'Google Gemini 2.5 Flash & Pro Dual Health Coach Architecture'],
       ['PRIMARY INGESTION', 'Google Health API v4 (REST/Protobuf) & Google Fitness REST API v1'],
       ['SECURITY & PRIVACY', 'Android Keystore AES-GCM-256, Cloud Firestore Security Rules, HIPAA-Ready'],
-      ['VERIFICATION PROFILE', '44 Comprehensive Automated Test Suites (100% Pass Rate), ProGuard R8 Release'],
-      ['PUBLICATION DATE', date + ' • Production Certified Release Build 1'],
+      ['VERIFICATION PROFILE', '45 Comprehensive Automated Test Suites (100% Pass Rate), ProGuard R8 Release (58.4 MB)'],
+      ['PUBLICATION DATE', date + ' • Production Certified Release Build 2'],
     ];
 
-    let my = metaY + 14;
+    let my = metaY + 12;
     metaItems.forEach(([k, v]) => {
-      doc.fillColor(this.colors.accentTeal).font('Helvetica-Bold').fontSize(7.8).text(k + ':', 68, my, { width: 165 });
-      doc.fillColor('#F8FAFC').font('Helvetica').fontSize(8.2).text(v, 235, my, { width: this.contentWidth - 195 });
-      my += 21.5;
+      doc.fillColor(this.colors.accentTeal).font('Helvetica-Bold').fontSize(7.5).text(k + ':', 68, my, { width: 165 });
+      doc.fillColor('#F8FAFC').font('Helvetica').fontSize(7.8).text(v, 235, my, { width: this.contentWidth - 195 });
+      my += 19.5;
     });
   }
 
@@ -228,57 +229,35 @@ class FitbitPDFEngine {
     );
   }
 
-  addTableOfContents(part1Chapters, part2Chapters) {
-    // Page 1 of TOC: Chapters 1 - 6
-    this.doc.addPage();
-    this.doc.y = 65;
+  addTableOfContents(tocSections) {
+    tocSections.forEach((section) => {
+      this.doc.addPage();
+      this.doc.y = 65;
 
-    this.addSectionHeader(1, 'TABLE OF CONTENTS: PART I', 'Architecture, Clean Foundations & Algorithmic Engines');
-    this.addParagraph('Part I details the clinical problem space, four-tier Clean Architecture, core technology decisions, mathematical formulas, and presentation modules.');
-    this.doc.moveDown(0.4);
+      this.addSectionHeader(1, section.partTitle, section.partSubtitle);
+      this.addParagraph(section.partDesc);
+      this.doc.moveDown(0.3);
 
-    part1Chapters.forEach((ch, idx) => {
-      this.ensureSpace(30);
-      const y = this.doc.y;
-      this.doc.roundedRect(50, y, 65, 18, 4).fill(this.colors.secondaryNavy);
-      this.doc.fillColor(this.colors.accentTeal).font('Helvetica-Bold').fontSize(8).text(`CH 0${idx + 1}`, 50, y + 4.5, { width: 65, align: 'center' });
+      section.chapters.forEach((ch) => {
+        this.ensureSpace(28);
+        const y = this.doc.y;
+        const padNum = ch.num < 10 ? `0${ch.num}` : `${ch.num}`;
 
-      this.doc.fillColor(this.colors.textDark).font('Helvetica-Bold').fontSize(9.5).text(ch.title, 125, y);
-      this.doc.fillColor(this.colors.textMuted).font('Helvetica').fontSize(8).text(ch.subtitle, 125, y + 12, { width: 310 });
-      this.doc.fillColor(this.colors.accentEmerald).font('Helvetica-Bold').fontSize(8.5).text(ch.sectionTag || `Section ${idx + 1}`, 445, y + 4, { width: 100, align: 'right' });
+        this.doc.roundedRect(50, y, 65, 18, 4).fill(this.colors.secondaryNavy);
+        this.doc.fillColor(this.colors.accentTeal).font('Helvetica-Bold').fontSize(8).text(`CH ${padNum}`, 50, y + 4.5, { width: 65, align: 'center' });
 
-      this.doc.y = y + 26;
+        this.doc.fillColor(this.colors.textDark).font('Helvetica-Bold').fontSize(9.5).text(ch.title, 125, y);
+        this.doc.fillColor(this.colors.textMuted).font('Helvetica').fontSize(8).text(ch.subtitle, 125, y + 12, { width: 310 });
+        this.doc.fillColor(this.colors.accentEmerald).font('Helvetica-Bold').fontSize(8.5).text(ch.sectionTag || `Section ${padNum}`, 445, y + 4, { width: 100, align: 'right' });
+
+        this.doc.y = y + 25;
+      });
+
+      if (section.callout) {
+        this.doc.moveDown(0.3);
+        this.addCallout(section.callout.type || 'INFO', section.callout.title, section.callout.text);
+      }
     });
-
-    this.doc.moveDown(0.5);
-    this.addCallout('INFO', 'Algorithmic Focus Notice', 'Chapters 4 and 5 provide explicit mathematical proofs for circadian BMR pacing, resting heart rate baselines, and sleep stage architecture.');
-
-    // Page 2 of TOC: Chapters 7 - 12
-    this.doc.addPage();
-    this.doc.y = 65;
-
-    this.addSectionHeader(1, 'TABLE OF CONTENTS: PART II', 'Data Pipelines, Security, Release Engineering & Verification');
-    this.addParagraph('Part II covers Google Health API v4 sync pipelines, cryptographic security, CI/CD automation, architectural trade-offs, test suites, and the roadmap.');
-    this.doc.moveDown(0.4);
-
-    part2Chapters.forEach((ch, idx) => {
-      this.ensureSpace(30);
-      const y = this.doc.y;
-      const chNum = idx + 7;
-      const padNum = chNum < 10 ? `0${chNum}` : `${chNum}`;
-
-      this.doc.roundedRect(50, y, 65, 18, 4).fill(this.colors.secondaryNavy);
-      this.doc.fillColor(this.colors.accentTeal).font('Helvetica-Bold').fontSize(8).text(`CH ${padNum}`, 50, y + 4.5, { width: 65, align: 'center' });
-
-      this.doc.fillColor(this.colors.textDark).font('Helvetica-Bold').fontSize(9.5).text(ch.title, 125, y);
-      this.doc.fillColor(this.colors.textMuted).font('Helvetica').fontSize(8).text(ch.subtitle, 125, y + 12, { width: 310 });
-      this.doc.fillColor(this.colors.accentEmerald).font('Helvetica-Bold').fontSize(8.5).text(ch.sectionTag || `Section ${chNum}`, 445, y + 4, { width: 100, align: 'right' });
-
-      this.doc.y = y + 26;
-    });
-
-    this.doc.moveDown(0.5);
-    this.addCallout('SECURITY', 'Production Certification Standard', 'Chapters 8 and 11 detail the cryptographic enclave standards, ProGuard/R8 rules, and 44 automated test suites required for production sign-off.');
   }
 
   addChapterBanner(chapterNum, title, subtitle, summary) {
@@ -403,24 +382,62 @@ class FitbitPDFEngine {
     const defaultColWidth = this.contentWidth / numCols;
     const widths = colWidths || Array(numCols).fill(defaultColWidth);
 
-    const rowHeight = 22;
-    const tableHeight = (rows.length + 1) * rowHeight;
-    this.ensureSpace(tableHeight + 15);
+    const calcRowHeight = (cells, isHeader = false) => {
+      let maxLines = 1;
+      cells.forEach((cell, idx) => {
+        const text = String(cell);
+        const colW = widths[idx] - 12;
+        const charsPerLine = Math.max(10, Math.floor(colW / (isHeader ? 4.8 : 4.1)));
+        const words = text.split(/\s+/);
+        let currentLineLen = 0;
+        let lines = 1;
+        words.forEach(w => {
+          if (currentLineLen + w.length + 1 > charsPerLine) {
+            lines++;
+            currentLineLen = w.length;
+          } else {
+            currentLineLen += w.length + 1;
+          }
+        });
+        if (lines > maxLines) maxLines = lines;
+      });
+      return Math.max(20, maxLines * (isHeader ? 11 : 9.5) + 10);
+    };
+
+    const headerHeight = calcRowHeight(headers, true);
+    const firstRowHeight = rows.length > 0 ? calcRowHeight(rows[0]) : 20;
+
+    // Ensure space for header + first row
+    if (this.doc.y + headerHeight + firstRowHeight + 10 > this.contentBottom) {
+      this.doc.addPage();
+      this.doc.y = 65;
+    }
 
     let currentY = this.doc.y;
 
-    // Header Row
-    this.doc.rect(50, currentY, this.contentWidth, rowHeight).fill(this.colors.secondaryNavy);
-    let currentX = 50;
-    headers.forEach((h, i) => {
-      this.doc.fillColor(this.colors.white).font('Helvetica-Bold').fontSize(8).text(h, currentX + 6, currentY + 6, { width: widths[i] - 12 });
-      currentX += widths[i];
-    });
+    const drawHeader = (y) => {
+      this.doc.rect(50, y, this.contentWidth, headerHeight).fill(this.colors.secondaryNavy);
+      let currentX = 50;
+      headers.forEach((h, i) => {
+        this.doc.fillColor(this.colors.white).font('Helvetica-Bold').fontSize(8).text(h, currentX + 6, y + 6, { width: widths[i] - 12 });
+        currentX += widths[i];
+      });
+      return y + headerHeight;
+    };
 
-    currentY += rowHeight;
+    currentY = drawHeader(currentY);
 
     // Data Rows
     rows.forEach((row, rIdx) => {
+      const rowHeight = calcRowHeight(row);
+
+      // Check if row exceeds page
+      if (currentY + rowHeight > this.contentBottom) {
+        this.doc.addPage();
+        this.doc.y = 65;
+        currentY = drawHeader(65);
+      }
+
       const bgColor = rIdx % 2 === 0 ? this.colors.white : this.colors.bgLight;
       this.doc.rect(50, currentY, this.contentWidth, rowHeight).fill(bgColor);
       this.doc.rect(50, currentY, this.contentWidth, rowHeight).lineWidth(0.5).strokeColor(this.colors.borderSubtle).stroke();
@@ -431,7 +448,7 @@ class FitbitPDFEngine {
         this.doc.fillColor(this.colors.textDark)
           .font(isBoldFirst ? 'Helvetica-Bold' : 'Helvetica')
           .fontSize(7.5)
-          .text(String(cell), cellX + 6, currentY + 6, { width: widths[cIdx] - 12 });
+          .text(String(cell), cellX + 6, currentY + 5, { width: widths[cIdx] - 12, lineGap: 1.8 });
         cellX += widths[cIdx];
       });
 
