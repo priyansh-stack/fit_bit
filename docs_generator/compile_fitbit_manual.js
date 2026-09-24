@@ -54,9 +54,9 @@ const tocSections = [
   {
     partTitle: 'TABLE OF CONTENTS: PART II',
     partSubtitle: 'AI Health Coach, Pipelines, Engineering Matrix & Verification',
-    partDesc: 'Part II covers the Gemini AI Health Coach, Google Health API v4 sync pipelines, cryptographic security, the 20-action matrix, 45 test suites, and roadmap.',
+    partDesc: 'Part II covers the Google Gemma 4 & Gemini AI Health Coach, Google Health API v4 sync pipelines, cryptographic security, the 20-action matrix, 45 test suites, and roadmap.',
     chapters: [
-      { num: 7, title: 'Fitbit AI Health Coach & Conversational Intelligence', subtitle: 'Gemini 2.5 Flash & Pro Dual Engine, Grounded Telemetry & Private Coaching Library', sectionTag: 'Section 7' },
+      { num: 7, title: 'Fitbit AI Health Coach & Conversational Intelligence', subtitle: 'Google Gemma 4 & Gemini Cascade, Sliding-Window Quota & Grounded Telemetry', sectionTag: 'Section 7' },
       { num: 8, title: 'Biometric Ingestion & Synchronization Pipelines', subtitle: 'Google Health API v4, OAuth 2.0 PKCE, Single-Flight Mutex & Offline Resilience', sectionTag: 'Section 8' },
       { num: 9, title: 'Cryptographic Security, Privacy & Regulatory Compliance', subtitle: 'Android KeyStore AES-GCM-256, Zero-Knowledge Vault, Firestore Rules & HIPAA', sectionTag: 'Section 9' },
       { num: 10, title: 'CI/CD Automation, Release Engineering & Binary Optimization', subtitle: 'GitHub Actions Matrix, ProGuard/R8 Obfuscation & ARM64 Tree Shaking', sectionTag: 'Section 10' },

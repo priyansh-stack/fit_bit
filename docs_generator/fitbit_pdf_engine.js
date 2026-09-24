@@ -130,7 +130,7 @@ class FitbitPDFEngine {
       ['TARGET AUDIENCE', targetAudience],
       ['TARGET OPERATING SYSTEMS', 'Android OS (API 24 Nougat - API 34 Android 14+), Flutter Engine'],
       ['SYSTEM VERSION', version],
-      ['AI REASONING ENGINE', 'Google Gemini 2.5 Flash & Pro Dual Health Coach Architecture'],
+      ['AI REASONING ENGINE', 'Google Gemma 4 & Gemini Cascade Architecture (10 queries/2h Quota)'],
       ['PRIMARY INGESTION', 'Google Health API v4 (REST/Protobuf) & Google Fitness REST API v1'],
       ['SECURITY & PRIVACY', 'Android Keystore AES-GCM-256, Cloud Firestore Security Rules, HIPAA-Ready'],
       ['VERIFICATION PROFILE', '45 Comprehensive Automated Test Suites (100% Pass Rate), ProGuard R8 Release (58.4 MB)'],

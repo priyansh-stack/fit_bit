@@ -115,7 +115,7 @@ class _AiCoachViewState extends State<_AiCoachView> {
                   BlocBuilder<AiCoachCubit, AiCoachState>(
                     builder: (context, state) {
                       return Text(
-                        state.isProModel ? 'Powered by Gemini Pro' : 'Powered by Gemini Flash',
+                        state.isProModel ? 'Powered by Google AI Pro' : 'Powered by Google AI (Gemini & Gemma)',
                         style: const TextStyle(
                           color: Color(0xFF38BDF8),
                           fontSize: 11,
@@ -230,15 +230,19 @@ class _AiCoachViewState extends State<_AiCoachView> {
             _scrollToBottom();
           }
           if (state.errorMessage != null) {
+            final isKeyErr = state.errorMessage!.toLowerCase().contains('api key');
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(state.errorMessage!),
                 backgroundColor: const Color(0xFFEF4444),
-                action: SnackBarAction(
-                  label: 'Set Key',
-                  textColor: Colors.white,
-                  onPressed: _openKeyDialog,
-                ),
+                duration: const Duration(seconds: 4),
+                action: isKeyErr
+                    ? SnackBarAction(
+                        label: 'Set Key',
+                        textColor: Colors.white,
+                        onPressed: _openKeyDialog,
+                      )
+                    : null,
               ),
             );
           }
@@ -246,28 +250,6 @@ class _AiCoachViewState extends State<_AiCoachView> {
         builder: (context, state) {
           return Column(
             children: [
-              // API Key Missing Warning Banner
-              if (!state.hasApiKey)
-                GestureDetector(
-                  onTap: _openKeyDialog,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    color: const Color(0xFF0284C7).withValues(alpha: 0.15),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.info_outline, color: Color(0xFF38BDF8), size: 18),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Tap here to add your Google Gemini API key to activate live responses.',
-                            style: TextStyle(color: Color(0xFF38BDF8), fontSize: 12),
-                          ),
-                        ),
-                        Icon(Icons.chevron_right, color: Color(0xFF38BDF8), size: 18),
-                      ],
-                    ),
-                  ),
-                ),
 
               // Chat Messages Stream
               Expanded(

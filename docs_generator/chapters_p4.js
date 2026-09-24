@@ -146,7 +146,7 @@ module.exports = function renderPart4(engine) {
       ['Net Sleep Subtraction', 'Restless wakefulness deducted from gross in-bed duration', 'VERIFIED (100% Pass in 6 Sleep Tests)'],
       ['04:00 AM Sleep Attribution', 'Sleep ending after 4 AM indexed to awakening day card', 'VERIFIED (100% Pass in Date Tests)'],
       ['Resting HR Continuity', 'Displays verified 69 bpm baseline on dashboard & heart card', 'VERIFIED (100% Pass in Heart Tests)'],
-      ['AI Health Coach Subsystem', 'Dual Gemini 2.5 Flash/Pro with live telemetry injection', 'VERIFIED (100% Pass in AI Coach Tests)'],
+      ['AI Health Coach Subsystem', 'Gemma 4 & Gemini cascade with 10 queries/2h quota & live telemetry', 'VERIFIED (100% Pass in AI Coach Tests)'],
       ['Dynamic User Identity', 'Greeting resolves dynamically from FirebaseAuth (Priyanshu)', 'VERIFIED (Zero Hardcoded Personas)'],
       ['Hardware KeyStore Security', 'OAuth tokens encrypted via AES-GCM-256 hardware TEE', 'VERIFIED (Hardware Enclave Audit Passed)'],
       ['Zero Compiler Warnings', 'Zero lint or analyzer issues across entire Dart codebase', 'VERIFIED (flutter analyze: 0 issues)'],

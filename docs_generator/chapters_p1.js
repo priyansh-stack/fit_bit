@@ -123,7 +123,7 @@ module.exports = function renderPart1(engine) {
       ['Cloud Database', 'Google Cloud Firestore', 'Supabase, Custom PostgreSQL', 'Built-in offline SQLite cache, sub-10ms reads, declarative security rules.'],
       ['Cryptographic Storage', 'flutter_secure_storage', 'SharedPreferences, Hive unencrypted', 'Hardware-backed Android KeyStore AES-GCM-256; zero plaintext token storage.'],
       ['Data Visualization', 'FL Chart (Custom Shaders)', 'Syncfusion, Native Canvas, WebView', 'High-performance GPU rendering, custom Bezier curves, interactive touch listeners.'],
-      ['AI Engine', 'Google Gemini 2.5 Flash / Pro', 'OpenAI GPT-4o, Local Ollama', 'Ultra-fast sub-second latency, 1M context token window, direct Google Cloud REST integration.'],
+      ['AI Engine', 'Google Gemma 4 & Gemini Cascade', 'OpenAI GPT-4o, Local Ollama', 'Ultra-fast sub-second latency, multi-model failover cascade, 10 queries/2h rolling quota, zero mock responses.'],
     ],
     [105, 115, 125, 150]
   );
